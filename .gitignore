@@ -1,5 +1,7 @@
 # Dependencies
 server/node_modules/
+dashboard/node_modules/
+dashboard/dist/
 
 # The live database and backups — never commit real client data to git
 server/fams.db

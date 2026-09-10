@@ -1,5 +1,17 @@
-import React, { useState, useMemo } from "react";
-import { Plus, Search, Printer, Lock, Clock, ShieldAlert, FileText, X, LogOut, LogIn, Archive, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight } from "lucide-react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, User } from "lucide-react";
+import Login from "./Login.jsx";
+import {
+  getStoredUser,
+  clearSession,
+  fetchClients,
+  fetchDocuments,
+  fetchAccessLog,
+  createDocument,
+  toggleCheckout as apiToggleCheckout,
+  lookupDocument,
+  ApiError,
+} from "./api.js";
 
 const CATEGORIES = [
   { key: "secretarial", label: "Secretarial records", note: "Shareholders, partners, owners", sensitivity: "High" },
@@ -18,33 +30,6 @@ const CLIENT_STATUS = {
   D: { label: "Deactivated", chip: "#E5E1D5", text: "#4A4638" },
   ADHOC: { label: "Adhoc (dormant)", chip: "#F6ECDA", text: "#7A5215" },
 };
-
-const CLIENTS_SEED = [
-  { id: 1, fileNo: "A1", company: "A & R Logistics Pte Ltd", roc: "200312360H", yearEnd: "DEC", dateInc: "2003-05-11", contact: "Raj, Mrs Raj", status: "A" },
-  { id: 2, fileNo: "A2", company: "Aastar Pte Ltd", roc: "200210603D", yearEnd: "DEC", dateInc: "2002-12-09", contact: "Ming", status: "A" },
-  { id: 3, fileNo: "A3", company: "AAA Global Foods Pte Ltd", roc: "200309786E", yearEnd: "SEP", dateInc: "2003-10-01", contact: "Noor", status: "A" },
-  { id: 4, fileNo: "A4", company: "Ambikas Marketing", roc: "526384000W", yearEnd: "DEC", dateInc: "1995-04-06", contact: "Rajashekar Deen", status: "D" },
-  { id: 5, fileNo: "A5", company: "Anas Trade Links Pte Ltd", roc: "200701528E", yearEnd: "DEC", dateInc: "2007-01-26", contact: "Abbas", status: "A" },
-  { id: 6, fileNo: "A6", company: "Aviacion Pte Ltd", roc: "200400243K", yearEnd: "DEC", dateInc: "2014-01-02", contact: "Lia / Connie", status: "A" },
-  { id: 7, fileNo: "A7", company: "Aveen's Fashion Pte Ltd", roc: "200006446K", yearEnd: "JULY", dateInc: "2000-07-21", contact: "Glan", status: "A" },
-  { id: 8, fileNo: "A8", company: "ARB Solutions Pte Ltd", roc: "201907880H", yearEnd: "AUG", dateInc: "2019-03-11", contact: "Bhoominathan c/o Pottu", status: "ADHOC" },
-  { id: 9, fileNo: "A9", company: "Asia Super Transporters Pte Ltd", roc: "201427382R", yearEnd: "SEP", dateInc: "2024-10-10", contact: "Listya Irene", status: "A" },
-  { id: 10, fileNo: "A10", company: "Big-Foot Engineering Pte Ltd", roc: "200416199R", yearEnd: "MAR", dateInc: "2004-12-16", contact: "Yahiya", status: "A" },
-];
-
-const SEED = [
-  { id: 1, code: "FAM-2026-0001", client: "Nav Ventures Pte Ltd", category: "secretarial", location: "Cabinet A / Drawer 1", dateReceived: "2026-08-02", loggedBy: "S. Tan", status: "Filed" },
-  { id: 2, code: "FAM-2026-0002", client: "Zenga Media Pte Ltd", category: "banking_tax", location: "Cabinet B / Drawer 3", dateReceived: "2026-08-10", loggedBy: "R. Kumar", status: "Filed" },
-  { id: 3, code: "FAM-2026-0003", client: "Nav Ventures Pte Ltd", category: "personal", location: "Locked Safe / Tray 2", dateReceived: "2026-08-14", loggedBy: "S. Tan", status: "Checked out" },
-];
-
-const SEED_LOG = [
-  { id: 1, code: "FAM-2026-0003", client: "Nav Ventures Pte Ltd", action: "Checked out", user: "S. Tan", time: "2026-09-08 10:14" },
-];
-
-function genCode(n) {
-  return `FAM-2026-${String(n).padStart(4, "0")}`;
-}
 
 function Label({ entry }) {
   const style = CAT_STYLE[entry.category];
@@ -76,9 +61,19 @@ function Label({ entry }) {
 }
 
 export default function App() {
-  const [entries, setEntries] = useState(SEED);
-  const [log, setLog] = useState(SEED_LOG);
-  const [clients] = useState(CLIENTS_SEED);
+  const [user, setUser] = useState(() => getStoredUser());
+
+  if (!user) {
+    return <Login onLoggedIn={setUser} />;
+  }
+
+  return <Dashboard user={user} onLogout={() => { clearSession(); setUser(null); }} />;
+}
+
+function Dashboard({ user, onLogout }) {
+  const [entries, setEntries] = useState([]);
+  const [log, setLog] = useState([]);
+  const [clients, setClients] = useState([]);
   const [tab, setTab] = useState("clients");
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState("all");
@@ -86,27 +81,66 @@ export default function App() {
   const [clientStatusFilter, setClientStatusFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [printPreview, setPrintPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const [form, setForm] = useState({ client: "", category: "secretarial", serviceDetail: "", location: "", dateReceived: "", loggedBy: "" });
+  const [form, setForm] = useState({ clientId: "", category: "secretarial", serviceDetail: "", location: "", dateReceived: "", loggedBy: user.username });
+  const [formBusy, setFormBusy] = useState(false);
 
   const [scanValue, setScanValue] = useState("");
   const [scanResult, setScanResult] = useState(null);
   const [scanStatus, setScanStatus] = useState("idle");
   const [scanHistory, setScanHistory] = useState([]);
 
-  function lookupCode(raw) {
+  const handleAuthError = useCallback(
+    (err) => {
+      if (err instanceof ApiError && err.status === 401) {
+        onLogout();
+        return true;
+      }
+      return false;
+    },
+    [onLogout]
+  );
+
+  const refreshAll = useCallback(async () => {
+    try {
+      const [c, d, l] = await Promise.all([fetchClients(), fetchDocuments(), fetchAccessLog()]);
+      setClients(c);
+      setEntries(d);
+      setLog(l);
+      setErrorMsg("");
+    } catch (err) {
+      if (!handleAuthError(err)) setErrorMsg(err.message || "Failed to load data");
+    }
+  }, [handleAuthError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      await refreshAll();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshAll]);
+
+  async function lookupCode(raw) {
     const code = raw.trim().toUpperCase();
     if (!code) {
       setScanStatus("idle");
       setScanResult(null);
       return;
     }
-    const match = entries.find((e) => e.code.toUpperCase() === code);
-    if (match) {
+    try {
+      const match = await lookupDocument(code);
       setScanResult(match);
       setScanStatus("found");
       setScanHistory((prev) => [{ code: match.code, time: new Date().toISOString().slice(11, 16) }, ...prev].slice(0, 6));
-    } else {
+    } catch (err) {
+      if (handleAuthError(err)) return;
       setScanResult(null);
       setScanStatus("not_found");
     }
@@ -144,7 +178,7 @@ export default function App() {
   }, [clients, clientQuery, clientStatusFilter]);
 
   function docCountFor(companyName) {
-    return entries.filter((e) => e.client.toLowerCase() === companyName.toLowerCase()).length;
+    return entries.filter((e) => (e.client || "").toLowerCase() === companyName.toLowerCase()).length;
   }
 
   function viewClientDocs(companyName) {
@@ -157,7 +191,7 @@ export default function App() {
     return entries.filter((e) => {
       const matchesQuery =
         query.trim() === "" ||
-        e.client.toLowerCase().includes(query.toLowerCase()) ||
+        (e.client || "").toLowerCase().includes(query.toLowerCase()) ||
         e.code.toLowerCase().includes(query.toLowerCase());
       const matchesCat = catFilter === "all" || e.category === catFilter;
       return matchesQuery && matchesCat;
@@ -172,41 +206,50 @@ export default function App() {
     return { total, critical, high, checkedOut };
   }, [entries]);
 
-  function submitForm(ev) {
+  async function submitForm(ev) {
     ev.preventDefault();
-    if (!form.client.trim() || !form.location.trim() || !form.dateReceived || !form.loggedBy.trim()) return;
-    const nextId = entries.length ? Math.max(...entries.map((e) => e.id)) + 1 : 1;
-    const entry = {
-      id: nextId,
-      code: genCode(nextId),
-      client: form.client.trim(),
-      category: form.category,
-      serviceDetail: form.serviceDetail.trim(),
-      location: form.location.trim(),
-      dateReceived: form.dateReceived,
-      loggedBy: form.loggedBy.trim(),
-      status: "Filed",
-    };
-    setEntries((prev) => [entry, ...prev]);
-    setShowForm(false);
-    setPrintPreview(entry);
-    setForm({ client: "", category: "secretarial", serviceDetail: "", location: "", dateReceived: "", loggedBy: "" });
+    if (!form.clientId || !form.location.trim() || !form.dateReceived || !form.loggedBy.trim()) return;
+    setFormBusy(true);
+    try {
+      const created = await createDocument({
+        clientId: Number(form.clientId),
+        category: form.category,
+        serviceDetail: form.serviceDetail.trim(),
+        location: form.location.trim(),
+        dateReceived: form.dateReceived,
+        loggedBy: form.loggedBy.trim(),
+      });
+      await refreshAll();
+      const clientName = clients.find((c) => c.id === Number(form.clientId))?.company || "";
+      setShowForm(false);
+      setPrintPreview({ ...created, client: created.client || clientName });
+      setForm({ clientId: "", category: "secretarial", serviceDetail: "", location: "", dateReceived: "", loggedBy: user.username });
+    } catch (err) {
+      if (!handleAuthError(err)) setErrorMsg(err.message || "Failed to create entry");
+    } finally {
+      setFormBusy(false);
+    }
   }
 
-  function toggleCheckout(entry) {
-    const nextStatus = entry.status === "Filed" ? "Checked out" : "Filed";
-    setEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...e, status: nextStatus } : e)));
-    setLog((prev) => [
-      {
-        id: prev.length ? Math.max(...prev.map((l) => l.id)) + 1 : 1,
-        code: entry.code,
-        client: entry.client,
-        action: nextStatus === "Checked out" ? "Checked out" : "Checked in",
-        user: entry.loggedBy || "Staff",
-        time: new Date().toISOString().slice(0, 16).replace("T", " "),
-      },
-      ...prev,
-    ]);
+  async function toggleCheckout(entry) {
+    try {
+      await apiToggleCheckout(entry.id);
+      await refreshAll();
+      if (scanResult && scanResult.id === entry.id) {
+        const refreshed = await lookupDocument(entry.code);
+        setScanResult(refreshed);
+      }
+    } catch (err) {
+      if (!handleAuthError(err)) setErrorMsg(err.message || "Failed to update checkout status");
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: "#EDEAE2", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B6656" }}>
+        Loading…
+      </div>
+    );
   }
 
   return (
@@ -217,13 +260,31 @@ export default function App() {
           <div style={{ fontFamily: "Georgia, serif", fontSize: 20, fontWeight: 700 }}>Financial Asset Register</div>
           <div style={{ fontSize: 12, color: "#A9A48F", marginTop: 2 }}>Chain-of-custody for statutory, tax and personal records</div>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          style={{ display: "flex", alignItems: "center", gap: 6, background: "#9C7A3C", color: "#1C2430", border: "none", padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}
-        >
-          <Plus size={16} /> New entry
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#A9A48F" }}>
+            <User size={14} /> {user.username} ({user.role})
+          </div>
+          <button
+            onClick={() => setShowForm(true)}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "#9C7A3C", color: "#1C2430", border: "none", padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}
+          >
+            <Plus size={16} /> New entry
+          </button>
+          <button
+            onClick={onLogout}
+            title="Log out"
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "none", color: "#EDEAE2", border: "1px solid #4A4638", padding: "10px 14px", fontWeight: 600, cursor: "pointer" }}
+          >
+            <LogOut size={14} /> Log out
+          </button>
+        </div>
       </div>
+
+      {errorMsg && (
+        <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "10px 28px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+          <AlertCircle size={14} /> {errorMsg}
+        </div>
+      )}
 
       <div style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 28px" }}>
         {/* Stats */}
@@ -523,7 +584,7 @@ export default function App() {
 
       {/* New entry form (slide-over) */}
       {showForm && (
-        <div style={{ position: "absolute", inset: 0, background: "rgba(28,36,48,0.4)", display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(28,36,48,0.4)", display: "flex", justifyContent: "flex-end" }}>
           <div style={{ width: 380, background: "#FBFAF6", height: "100%", padding: 24, overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div style={{ fontFamily: "Georgia, serif", fontSize: 17, fontWeight: 700 }}>New register entry</div>
@@ -531,10 +592,10 @@ export default function App() {
             </div>
             <form onSubmit={submitForm} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Field label="Client">
-                <select value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} style={inputStyle}>
+                <select value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} style={inputStyle}>
                   <option value="">Select a client…</option>
                   {clients.map((c) => (
-                    <option key={c.id} value={c.company}>{c.company} ({c.fileNo})</option>
+                    <option key={c.id} value={c.id}>{c.company} ({c.fileNo})</option>
                   ))}
                 </select>
               </Field>
@@ -566,8 +627,8 @@ export default function App() {
               <Field label="Logged by">
                 <input value={form.loggedBy} onChange={(e) => setForm({ ...form, loggedBy: e.target.value })} style={inputStyle} placeholder="Staff name" />
               </Field>
-              <button type="submit" style={{ marginTop: 8, background: "#9C7A3C", color: "#1C2430", border: "none", padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}>
-                Save & generate label
+              <button type="submit" disabled={formBusy} style={{ marginTop: 8, background: "#9C7A3C", color: "#1C2430", border: "none", padding: "10px 16px", fontWeight: 600, cursor: formBusy ? "default" : "pointer", opacity: formBusy ? 0.7 : 1 }}>
+                {formBusy ? "Saving…" : "Save & generate label"}
               </button>
             </form>
           </div>
@@ -576,7 +637,7 @@ export default function App() {
 
       {/* Label preview modal */}
       {printPreview && (
-        <div style={{ position: "absolute", inset: 0, background: "rgba(28,36,48,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(28,36,48,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "#FBFAF6", padding: 24, border: "1px solid #C9C4B6" }}>
             <div style={{ fontFamily: "Georgia, serif", fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Label preview</div>
             <Label entry={printPreview} />
