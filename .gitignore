@@ -11,6 +11,9 @@ server/backups/
 # Environment secrets (JWT signing key, etc.) once you move it out of code
 .env
 
+# Local tooling config (not needed to run the app)
+.claude/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
