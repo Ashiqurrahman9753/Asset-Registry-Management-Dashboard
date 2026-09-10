@@ -1,0 +1,14 @@
+# Dependencies
+server/node_modules/
+
+# The live database and backups — never commit real client data to git
+server/fams.db
+server/fams.db-*
+server/backups/
+
+# Environment secrets (JWT signing key, etc.) once you move it out of code
+.env
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

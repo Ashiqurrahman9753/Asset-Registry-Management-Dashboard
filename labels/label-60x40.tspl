@@ -1,0 +1,24 @@
+SIZE 60 mm, 40 mm
+GAP 2 mm, 0 mm
+CLS
+
+REM --- Header: client name ---
+TEXT 24,18,"3",0,1,1,"Nav Ventures Pte Ltd"
+BAR 24,54,432,2
+
+REM --- Left column: single unique ID above QR ---
+TEXT 24,64,"2",0,1,1,"FAM-2026-0001"
+QRCODE 24,96,L,6,A,0,"FAM-2026-0001"
+
+REM --- Right column: service (bold, capitalized) above the chosen service name ---
+TEXT 240,64,"2",0,2,2,"SERVICE"
+TEXT 240,140,"3",0,1,1,"Accounting"
+BOX 240,176,392,206,2
+TEXT 250,182,"2",0,1,1,"AY 2025-26"
+
+REM --- Footer: date received ---
+BAR 24,256,432,2
+TEXT 24,266,"1",0,1,1,"DATE RECEIVED"
+TEXT 24,282,"3",0,1,1,"08 Sep 2026"
+
+PRINT 1
