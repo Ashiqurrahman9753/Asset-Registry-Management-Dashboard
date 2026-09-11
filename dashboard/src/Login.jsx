@@ -27,7 +27,7 @@ export default function Login({ onLoggedIn }) {
   return (
     <div
       style={{
-        fontFamily: "Inter, system-ui, sans-serif",
+        fontFamily: "'Inter', system-ui, sans-serif",
         background: "#EDEAE2",
         minHeight: "100vh",
         display: "flex",
@@ -49,7 +49,7 @@ export default function Login({ onLoggedIn }) {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <Lock size={18} color="#9C7A3C" />
-          <div style={{ fontFamily: "Georgia, serif", fontSize: 18, fontWeight: 700, color: "#1C2430" }}>
+          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700, color: "#1C2430" }}>
             Financial Asset Register
           </div>
         </div>
@@ -106,6 +106,6 @@ const inputStyle = {
   background: "#fff",
   padding: "8px 10px",
   fontSize: 13,
-  fontFamily: "Inter, sans-serif",
+  fontFamily: "'Inter', sans-serif",
   color: "#1C2430",
 };

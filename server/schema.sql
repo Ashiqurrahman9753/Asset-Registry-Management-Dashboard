@@ -8,7 +8,12 @@ CREATE TABLE IF NOT EXISTS clients (
   roc TEXT,
   year_end TEXT,
   date_inc TEXT,
-  contact TEXT,
+  registered_address TEXT,
+  directors TEXT,             -- one director name per line
+  last_agm_date TEXT,         -- set automatically when an AGM/Annual Return filing is logged
+  contact TEXT,               -- person in charge — name
+  contact_phone TEXT,         -- person in charge — phone (the one number staff actually call)
+  contact_email TEXT,         -- person in charge — email, optional
   status TEXT NOT NULL DEFAULT 'A' CHECK (status IN ('A', 'D', 'ADHOC')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -23,6 +28,8 @@ CREATE TABLE IF NOT EXISTS documents (
   date_received TEXT NOT NULL,
   logged_by TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'Filed' CHECK (status IN ('Filed', 'Checked out')),
+  is_batch INTEGER NOT NULL DEFAULT 0,  -- 1 = this entry represents a whole box/bag, not one document
+  batch_count INTEGER,                  -- approximate number of documents inside, when is_batch
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -49,6 +56,21 @@ CREATE TABLE IF NOT EXISTS login_log (
   logged_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Client particulars are edited by admins only (see requireAdmin on PATCH
+-- /api/clients/:id) — every field change is recorded here so there's a real
+-- paper trail on data sensitive enough to matter (registered address,
+-- directors, contact details).
+CREATE TABLE IF NOT EXISTS client_edit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  field TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT,
+  changed_by TEXT NOT NULL,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_code ON documents(code);
 CREATE INDEX IF NOT EXISTS idx_access_log_document ON access_log(document_id);
+CREATE INDEX IF NOT EXISTS idx_client_edit_log_client ON client_edit_log(client_id);

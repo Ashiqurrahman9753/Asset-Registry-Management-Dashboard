@@ -69,7 +69,12 @@ function mapClient(c) {
     roc: c.roc || "",
     yearEnd: c.year_end || "",
     dateInc: c.date_inc || "",
+    registeredAddress: c.registered_address || "",
+    directors: c.directors || "",
+    lastAgmDate: c.last_agm_date || "",
     contact: c.contact || "",
+    contactPhone: c.contact_phone || "",
+    contactEmail: c.contact_email || "",
     status: c.status,
   };
 }
@@ -87,6 +92,28 @@ function mapDocument(d) {
     dateReceived: d.date_received,
     loggedBy: d.logged_by,
     status: d.status,
+    isBatch: !!d.is_batch,
+    batchCount: d.batch_count || null,
+    // Present only on the scan-lookup response — the company snapshot a
+    // handheld scanner needs, since it's usually used away from the register UI.
+    clientRoc: d.client_roc || "",
+    clientRegisteredAddress: d.client_registered_address || "",
+    clientDirectors: d.client_directors || "",
+    clientLastAgmDate: d.client_last_agm_date || "",
+    clientContactName: d.client_contact_name || "",
+    clientContactPhone: d.client_contact_phone || "",
+    clientContactEmail: d.client_contact_email || "",
+  };
+}
+
+function mapEditLogEntry(l) {
+  return {
+    id: l.id,
+    field: l.field,
+    oldValue: l.old_value,
+    newValue: l.new_value,
+    changedBy: l.changed_by,
+    changedAt: (l.changed_at || "").replace("T", " ").slice(0, 16),
   };
 }
 
@@ -106,6 +133,38 @@ export async function fetchClients() {
   return rows.map(mapClient);
 }
 
+export async function createClient({
+  company,
+  roc,
+  yearEnd,
+  dateInc,
+  registeredAddress,
+  directors,
+  contact,
+  contactPhone,
+  contactEmail,
+  status,
+}) {
+  const row = await request("/api/clients", {
+    method: "POST",
+    body: JSON.stringify({ company, roc, yearEnd, dateInc, registeredAddress, directors, contact, contactPhone, contactEmail, status }),
+  });
+  return mapClient(row);
+}
+
+export async function updateClient(id, patch) {
+  const row = await request(`/api/clients/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return mapClient(row);
+}
+
+export async function fetchClientEditLog(id) {
+  const rows = await request(`/api/clients/${id}/edit-log`);
+  return rows.map(mapEditLogEntry);
+}
+
 export async function fetchDocuments(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v))
@@ -119,7 +178,7 @@ export async function lookupDocument(code) {
   return mapDocument(row);
 }
 
-export async function createDocument({ clientId, category, serviceDetail, location, dateReceived, loggedBy }) {
+export async function createDocument({ clientId, category, serviceDetail, location, dateReceived, loggedBy, isAgmFiling, isBatch, batchCount }) {
   const row = await request("/api/documents", {
     method: "POST",
     body: JSON.stringify({
@@ -129,6 +188,9 @@ export async function createDocument({ clientId, category, serviceDetail, locati
       location,
       dateReceived,
       loggedBy,
+      isAgmFiling,
+      isBatch,
+      batchCount,
     }),
   });
   return mapDocument(row);
