@@ -75,17 +75,31 @@ function mapClient(c) {
     contact: c.contact || "",
     contactPhone: c.contact_phone || "",
     contactEmail: c.contact_email || "",
+    fax: c.fax || "",
     status: c.status,
+    // Report-page working fields — not auto-fetched (see the Report tab),
+    // just notes staff keep updated.
+    acraStatus: c.acra_status || "Not checked",
+    taxNotes: c.tax_notes || "",
+    pendingWork: c.pending_work || "",
+    // The client company's own annual revenue — a manual KYC/portfolio data
+    // point, not Jardeen's own billing/fee income.
+    annualRevenue: c.annual_revenue !== null && c.annual_revenue !== undefined ? Number(c.annual_revenue) : null,
   };
 }
 
 function mapDocument(d) {
   return {
+    // "document" unless the scan-lookup fell back to a client folder label
+    // (its QR encodes the client's file number, not a document code) —
+    // the scan tab uses this to know which fields/actions make sense.
+    resultType: d.result_type || "document",
     id: d.id,
     code: d.code,
     clientId: d.client_id,
     client: d.client_name,
     clientFileNo: d.client_file_no,
+    clientStatus: d.client_status,
     category: d.category,
     serviceDetail: d.service_detail || "",
     location: d.location,
@@ -103,6 +117,7 @@ function mapDocument(d) {
     clientContactName: d.client_contact_name || "",
     clientContactPhone: d.client_contact_phone || "",
     clientContactEmail: d.client_contact_email || "",
+    clientFax: d.client_fax || "",
   };
 }
 
@@ -134,6 +149,7 @@ export async function fetchClients() {
 }
 
 export async function createClient({
+  fileNo,
   company,
   roc,
   yearEnd,
@@ -143,11 +159,12 @@ export async function createClient({
   contact,
   contactPhone,
   contactEmail,
+  fax,
   status,
 }) {
   const row = await request("/api/clients", {
     method: "POST",
-    body: JSON.stringify({ company, roc, yearEnd, dateInc, registeredAddress, directors, contact, contactPhone, contactEmail, status }),
+    body: JSON.stringify({ fileNo, company, roc, yearEnd, dateInc, registeredAddress, directors, contact, contactPhone, contactEmail, fax, status }),
   });
   return mapClient(row);
 }
@@ -158,6 +175,59 @@ export async function updateClient(id, patch) {
     body: JSON.stringify(patch),
   });
   return mapClient(row);
+}
+
+export async function updateClientReportFields(id, patch) {
+  const row = await request(`/api/clients/${id}/report-fields`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return mapClient(row);
+}
+
+function mapSchedule(s) {
+  return {
+    id: s.id,
+    clientId: s.client_id,
+    client: s.client_name,
+    clientFileNo: s.client_file_no,
+    clientStatus: s.client_status,
+    taskName: s.task_name,
+    frequency: s.frequency,
+    dueDay: s.due_day,
+    dueMonth: s.due_month,
+    lastCompletedDate: s.last_completed_date,
+  };
+}
+
+export async function fetchAllSchedules() {
+  const rows = await request("/api/schedules");
+  return rows.map(mapSchedule);
+}
+
+export async function fetchClientSchedules(clientId) {
+  const rows = await request(`/api/clients/${clientId}/schedules`);
+  return rows.map(mapSchedule);
+}
+
+export async function createSchedule(clientId, { taskName, frequency, dueDay, dueMonth }) {
+  const row = await request(`/api/clients/${clientId}/schedules`, {
+    method: "POST",
+    body: JSON.stringify({ taskName, frequency, dueDay, dueMonth }),
+  });
+  return mapSchedule(row);
+}
+
+export async function updateSchedule(id, patch) {
+  const row = await request(`/api/schedules/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return mapSchedule(row);
+}
+
+export function deleteSchedule(id) {
+  return request(`/api/schedules/${id}`, { method: "DELETE" });
 }
 
 export async function fetchClientEditLog(id) {
@@ -196,9 +266,88 @@ export async function createDocument({ clientId, category, serviceDetail, locati
   return mapDocument(row);
 }
 
+export async function createBatchIntake({ clientId, location, dateReceived, loggedBy, batchCount, items }) {
+  const rows = await request("/api/documents/batch-intake", {
+    method: "POST",
+    body: JSON.stringify({ clientId, location, dateReceived, loggedBy, batchCount, items }),
+  });
+  return rows.map(mapDocument);
+}
+
 export async function toggleCheckout(documentId) {
   const row = await request(`/api/documents/${documentId}/toggle-checkout`, { method: "POST" });
   return mapDocument(row);
+}
+
+export function printDocumentLabel(documentId) {
+  return request(`/api/documents/${documentId}/print`, { method: "POST" });
+}
+
+export function printClientFolderLabel(clientId) {
+  return request(`/api/clients/${clientId}/print-folder-label`, { method: "POST" });
+}
+
+function mapDocumentFile(f) {
+  return {
+    id: f.id,
+    documentId: f.document_id,
+    filename: f.filename,
+    mimeType: f.mime_type,
+    sizeBytes: f.size_bytes,
+    uploadedBy: f.uploaded_by,
+    uploadedAt: (f.uploaded_at || "").replace("T", " ").slice(0, 16),
+  };
+}
+
+export async function fetchDocumentFiles(documentId) {
+  const rows = await request(`/api/documents/${documentId}/files`);
+  return rows.map(mapDocumentFile);
+}
+
+// Multipart upload — can't go through the shared `request()` helper since
+// that always sends JSON; FormData needs the browser to set its own
+// Content-Type (with the multipart boundary) instead.
+export async function uploadDocumentFile(documentId, file) {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append("file", file);
+  let res;
+  try {
+    res = await fetch(`${API_URL}/api/documents/${documentId}/files`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+  } catch {
+    throw new ApiError("Can't reach the server — is it running on " + API_URL + "?", 0);
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    // no body
+  }
+  if (!res.ok) throw new ApiError((data && data.error) || `Upload failed (${res.status})`, res.status);
+  return mapDocumentFile(data);
+}
+
+export function deleteDocumentFile(fileId) {
+  return request(`/api/files/${fileId}`, { method: "DELETE" });
+}
+
+// Fetches the file as a blob (carrying the auth header a plain <a href>
+// can't send) and opens it in a new tab — works for PDFs/images inline,
+// and downloads for types the browser can't render.
+export async function openDocumentFile(fileId, filename) {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/api/files/${fileId}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(`Could not open ${filename || "file"} (${res.status})`, res.status);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 export async function fetchAccessLog() {

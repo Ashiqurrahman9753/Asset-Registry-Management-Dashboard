@@ -1,16 +1,18 @@
 {
   "name": "fams-server",
   "version": "1.0.0",
-  "description": "Local backend for the Financial Asset Management System — SQLite-backed REST API.",
+  "description": "Backend for the Financial Asset Management System — PostgreSQL-backed REST API.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.3.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.19.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.3.0",
+    "pg": "^8.23.0"
   }
 }
