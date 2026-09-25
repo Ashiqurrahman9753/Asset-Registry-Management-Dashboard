@@ -266,10 +266,10 @@ export async function createDocument({ clientId, category, serviceDetail, locati
   return mapDocument(row);
 }
 
-export async function createBatchIntake({ clientId, location, dateReceived, loggedBy, batchCount, items }) {
+export async function createBatchIntake({ clientId, location, dateReceived, loggedBy, batchCount, items, isAgmFiling }) {
   const rows = await request("/api/documents/batch-intake", {
     method: "POST",
-    body: JSON.stringify({ clientId, location, dateReceived, loggedBy, batchCount, items }),
+    body: JSON.stringify({ clientId, location, dateReceived, loggedBy, batchCount, items, isAgmFiling }),
   });
   return rows.map(mapDocument);
 }

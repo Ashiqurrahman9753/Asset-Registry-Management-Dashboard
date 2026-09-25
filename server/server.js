@@ -96,19 +96,39 @@ async function dbRun(sql, params = []) {
 // lookup and the UNIQUE constraint on documents.code both depend on.
 const CATEGORY_CODE = { secretarial: "SC", bookkeeping: "BK", banking_tax: "BT", personal: "PS" };
 
-async function genCode(category) {
+// queryAll defaults to a plain pool query, but batch-intake passes one bound
+// to a transaction's own client so the scan sees that transaction's own
+// not-yet-committed inserts (needed to number items within one box correctly).
+async function genCode(category, queryAll = dbAll) {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(-2);
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const catCode = CATEGORY_CODE[category] || "XX";
   const prefix = `JDM${yy}${mm}${catCode}`;
-  const existing = await dbAll("SELECT code FROM documents WHERE code LIKE $1", [`${prefix}%`]);
+  const existing = await queryAll("SELECT code FROM documents WHERE code LIKE $1", [`${prefix}%`]);
   let maxSeq = 0;
   for (const row of existing) {
     const m = row.code.slice(prefix.length).match(/^(\d+)$/);
     if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
   }
   return `${prefix}${maxSeq + 1}`;
+}
+
+const DUPLICATE_CODE_RETRY_ATTEMPTS = 5;
+
+// genCode's next-sequence number is computed by scanning existing codes, not
+// a DB sequence, so two requests logging the same category in the same
+// month can race and compute the same code. insertWithCode must use
+// `ON CONFLICT (code) DO NOTHING RETURNING *` so a collision comes back as
+// "no row" instead of throwing — that lets this retry with a freshly
+// generated code without aborting an enclosing transaction.
+async function genCodeAndInsert(queryAll, category, insertWithCode) {
+  for (let attempt = 1; attempt <= DUPLICATE_CODE_RETRY_ATTEMPTS; attempt++) {
+    const code = await genCode(category, queryAll);
+    const row = await insertWithCode(code);
+    if (row) return row;
+  }
+  throw new Error(`Could not generate a unique document code for "${category}" after ${DUPLICATE_CODE_RETRY_ATTEMPTS} attempts`);
 }
 
 // File numbers are assigned by the system, not typed by staff — nobody
@@ -317,25 +337,39 @@ app.get("/api/clients/:id/edit-log", requireAdmin, async (req, res, next) => {
 
 // Report-page working fields (ACRA status, tax notes, pending work) — quick
 // notes any staff member updates day to day, not gated admin-only like the
-// core particulars above, and not run through the edit-log paper trail.
+// core particulars above. Still written to client_edit_log like every other
+// client field, so there's a record of who changed what even though anyone
+// logged in (not just admins) can make the change.
 const REPORT_FIELDS = { acraStatus: "acra_status", taxNotes: "tax_notes", pendingWork: "pending_work", annualRevenue: "annual_revenue" };
 
 app.patch("/api/clients/:id/report-fields", async (req, res, next) => {
   try {
-    const client = await dbGet("SELECT id FROM clients WHERE id = $1", [req.params.id]);
+    const client = await dbGet("SELECT * FROM clients WHERE id = $1", [req.params.id]);
     if (!client) return res.status(404).json({ error: "Client not found" });
 
     const sets = [];
     const params = [];
+    const logEntries = [];
     for (const [bodyKey, column] of Object.entries(REPORT_FIELDS)) {
-      if (req.body[bodyKey] !== undefined) {
-        params.push(req.body[bodyKey]);
-        sets.push(`${column} = $${params.length}`);
-      }
+      if (req.body[bodyKey] === undefined) continue;
+      const newValue = req.body[bodyKey];
+      const oldValue = client[column];
+      if (String(newValue ?? "") === String(oldValue ?? "")) continue;
+      params.push(newValue);
+      sets.push(`${column} = $${params.length}`);
+      logEntries.push({ field: column, oldValue, newValue });
     }
     if (sets.length === 0) return res.status(400).json({ error: "No report fields provided" });
     params.push(client.id);
     const updated = await dbGet(`UPDATE clients SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`, params);
+
+    for (const entry of logEntries) {
+      await dbRun(
+        "INSERT INTO client_edit_log (client_id, field, old_value, new_value, changed_by) VALUES ($1, $2, $3, $4, $5)",
+        [client.id, entry.field, entry.oldValue, entry.newValue, req.user.username]
+      );
+    }
+
     res.json(updated);
   } catch (err) {
     next(err);
@@ -522,25 +556,27 @@ app.post("/api/documents", async (req, res, next) => {
     if (!clientId || !category || !location || !dateReceived || !loggedBy) {
       return res.status(400).json({ error: "clientId, category, location, dateReceived, loggedBy are required" });
     }
-    const code = await genCode(category);
     // A "batch" entry represents a whole box/bag a client dropped off — one
     // register entry and one label for the box itself, not one per page, since
     // there's rarely space to file or scan each document individually on intake.
-    const created = await dbGet(
-      `INSERT INTO documents (code, client_id, category, service_detail, location, date_received, logged_by, status, is_batch, batch_count)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'Filed', $8, $9)
-       RETURNING *`,
-      [
-        code,
-        clientId,
-        category,
-        serviceDetail || null,
-        location,
-        dateReceived,
-        loggedBy,
-        isBatch ? 1 : 0,
-        isBatch && batchCount ? Number(batchCount) : null,
-      ]
+    const created = await genCodeAndInsert(dbAll, category, (code) =>
+      dbGet(
+        `INSERT INTO documents (code, client_id, category, service_detail, location, date_received, logged_by, status, is_batch, batch_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'Filed', $8, $9)
+         ON CONFLICT (code) DO NOTHING
+         RETURNING *`,
+        [
+          code,
+          clientId,
+          category,
+          serviceDetail || null,
+          location,
+          dateReceived,
+          loggedBy,
+          isBatch ? 1 : 0,
+          isBatch && batchCount ? Number(batchCount) : null,
+        ]
+      )
     );
 
     // An explicit flag, not text-matching on service_detail — reliable signal
@@ -561,25 +597,51 @@ app.post("/api/documents", async (req, res, next) => {
 // creates one document row per ticked item, all sharing the same box,
 // location, date, and logged-by, each still getting its own unique code.
 app.post("/api/documents/batch-intake", async (req, res, next) => {
+  const { clientId, location, dateReceived, loggedBy, batchCount, items, isAgmFiling } = req.body;
+  if (!clientId || !location || !dateReceived || !loggedBy || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "clientId, location, dateReceived, loggedBy, and at least one checked item are required" });
+  }
+
+  // One transaction for the whole box: if any item fails partway through
+  // (e.g. exhausting the code-collision retries above), nothing in the
+  // batch is left half-committed — the client either gets every item
+  // logged, or none of them.
+  const client = await pool.connect();
   try {
-    const { clientId, location, dateReceived, loggedBy, batchCount, items } = req.body;
-    if (!clientId || !location || !dateReceived || !loggedBy || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: "clientId, location, dateReceived, loggedBy, and at least one checked item are required" });
-    }
+    await client.query("BEGIN");
+    const queryAll = async (sql, params) => (await client.query(sql, params)).rows;
+    const queryGet = async (sql, params) => (await client.query(sql, params)).rows[0];
+
     const created = [];
     for (const item of items) {
-      const code = await genCode(item.category);
-      const row = await dbGet(
-        `INSERT INTO documents (code, client_id, category, service_detail, location, date_received, logged_by, status, is_batch, batch_count)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'Filed', 1, $8)
-         RETURNING *`,
-        [code, clientId, item.category, item.serviceDetail || null, location, dateReceived, loggedBy, batchCount ? Number(batchCount) : null]
+      const row = await genCodeAndInsert(queryAll, item.category, (code) =>
+        queryGet(
+          `INSERT INTO documents (code, client_id, category, service_detail, location, date_received, logged_by, status, is_batch, batch_count)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'Filed', 1, $8)
+           ON CONFLICT (code) DO NOTHING
+           RETURNING *`,
+          [code, clientId, item.category, item.serviceDetail || null, location, dateReceived, loggedBy, batchCount ? Number(batchCount) : null]
+        )
       );
       created.push(row);
     }
+
+    // Same explicit-flag signal as the single-document route (POST
+    // /api/documents above) — a box that includes the AGM/Annual Return
+    // filing settles the client's AR for the year just as much as if it
+    // had been logged individually. Without this, the batch-intake path
+    // could never clear a client's AR-overdue status.
+    if (isAgmFiling) {
+      await client.query("UPDATE clients SET last_agm_date = $1 WHERE id = $2", [dateReceived, clientId]);
+    }
+
+    await client.query("COMMIT");
     res.status(201).json(created);
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     next(err);
+  } finally {
+    client.release();
   }
 });
 
@@ -588,11 +650,15 @@ app.post("/api/documents/:id/toggle-checkout", async (req, res, next) => {
     const doc = await dbGet("SELECT * FROM documents WHERE id = $1", [req.params.id]);
     if (!doc) return res.status(404).json({ error: "Document not found" });
     const nextStatus = doc.status === "Filed" ? "Checked out" : "Filed";
+    // documents.status uses 'Filed'/'Checked out'; access_log.action uses
+    // 'Checked out'/'Checked in' — two different vocabularies for the same
+    // transition, so they can't share nextStatus directly.
+    const action = nextStatus === "Checked out" ? "Checked out" : "Checked in";
     // req.user comes from the verified login token, not the request body —
     // so the log can't be spoofed by typing someone else's name.
     const staff = req.user.username;
     const updated = await dbGet("UPDATE documents SET status = $1 WHERE id = $2 RETURNING *", [nextStatus, doc.id]);
-    await dbRun("INSERT INTO access_log (document_id, action, staff) VALUES ($1, $2, $3)", [doc.id, nextStatus, staff]);
+    await dbRun("INSERT INTO access_log (document_id, action, staff) VALUES ($1, $2, $3)", [doc.id, action, staff]);
     res.json(updated);
   } catch (err) {
     next(err);

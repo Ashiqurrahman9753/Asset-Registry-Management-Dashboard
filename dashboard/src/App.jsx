@@ -104,6 +104,19 @@ function formatDisplayDate(date) {
   return `${date.getDate()} ${MONTH_ABBR[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+// date.setMonth(date.getMonth() + n) preserves the original day-of-month,
+// which overflows into the following month whenever the target month is
+// shorter (e.g. FYE=July, day 31, + 7 months lands on "Feb 31" -> rolls to
+// Mar 3 instead of the intended Feb 28/29). Clamp to the target month's own
+// last day instead, same as computeNextDue's lastDayOfMonth/makeDate below.
+function addMonthsClamped(date, monthsToAdd) {
+  const targetMonthIndex = date.getMonth() + monthsToAdd;
+  const targetYear = date.getFullYear() + Math.floor(targetMonthIndex / 12);
+  const normalizedMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const lastDayOfTargetMonth = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+  return new Date(targetYear, normalizedMonth, Math.min(date.getDate(), lastDayOfTargetMonth));
+}
+
 function computeArDeadline(yearEndMonth, lastAgmDate, today = new Date()) {
   const m = MONTH_INDEX[String(yearEndMonth || "").trim().toUpperCase().slice(0, 3)];
   if (m === undefined) return null;
@@ -119,8 +132,7 @@ function computeArDeadline(yearEndMonth, lastAgmDate, today = new Date()) {
     fye = new Date(fyeYear, m + 1, 0);
   }
 
-  const deadline = new Date(fye);
-  deadline.setMonth(deadline.getMonth() + 7);
+  const deadline = addMonthsClamped(fye, 7);
   const daysLeft = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
   return { fye, deadline, daysLeft, overdue: daysLeft < 0 };
 }
@@ -777,6 +789,7 @@ function Dashboard({ user, onLogout }) {
           loggedBy: form.loggedBy.trim(),
           batchCount: form.batchCount ? Number(form.batchCount) : null,
           items,
+          isAgmFiling: form.checkedItems.includes("secretarial") && form.isAgmFiling,
         });
         created = rows[0]; // one physical box gets one label, printed from the first entry
       } else {
@@ -1749,6 +1762,19 @@ function Dashboard({ user, onLogout }) {
                         ))}
                       </div>
                     </Field>
+                    {form.checkedItems.includes("secretarial") && (
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, background: "#F6ECDA", padding: "10px 12px", fontSize: 12, color: "#4A4638", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={form.isAgmFiling}
+                          onChange={(e) => setForm({ ...form, isAgmFiling: e.target.checked })}
+                        />
+                        <span style={{ display: "inline-flex", alignItems: "center" }}>
+                          This box includes the AGM / Annual Return filing
+                          <InfoHint text="Checking this updates the client's Last AGM Filed date to the date received below." />
+                        </span>
+                      </label>
+                    )}
                     <Field label="Approximate number of documents">
                       <input
                         type="number"
@@ -2499,7 +2525,8 @@ function normalizeImportStatus(raw) {
 // day/month for an incorporation date, which the AGM/compliance logic relies on.
 function normalizeImportDate(value) {
   if (value instanceof Date && !isNaN(value)) {
-    return value.toISOString().slice(0, 10);
+    // formatLocalDate, not toISOString() — see the comment above it.
+    return formatLocalDate(value);
   }
   const s = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
@@ -3416,14 +3443,20 @@ function ReportImportModal({ onClose, onImported, clients }) {
         const hasTax = Object.prototype.hasOwnProperty.call(lookup, "taxnotes");
         const hasPending = Object.prototype.hasOwnProperty.call(lookup, "pendingwork");
         const hasRevenue = Object.prototype.hasOwnProperty.call(lookup, "annualrevenue");
-        const rawRevenue = hasRevenue ? String(lookup["annualrevenue"]).trim() : "";
+        // Strip thousands separators ("1,234,000") before parsing — without
+        // this, Number() returns NaN, which JSON.stringify silently turns
+        // into null and wipes out the client's existing revenue figure.
+        const rawRevenue = hasRevenue ? String(lookup["annualrevenue"]).trim().replace(/,/g, "") : "";
+        const parsedRevenue = rawRevenue === "" ? null : Number(rawRevenue);
+        const revenueInvalid = hasRevenue && rawRevenue !== "" && Number.isNaN(parsedRevenue);
         return {
           fileNo,
           client,
           acraStatus: hasAcra ? String(lookup["acrastatus"]).trim() : null,
           taxNotes: hasTax ? String(lookup["taxnotes"]).trim() : null,
           pendingWork: hasPending ? String(lookup["pendingwork"]).trim() : null,
-          annualRevenue: hasRevenue ? (rawRevenue === "" ? null : Number(rawRevenue)) : undefined,
+          annualRevenue: hasRevenue ? parsedRevenue : undefined,
+          revenueInvalid,
         };
       });
       setRows(mapped);
@@ -3451,11 +3484,22 @@ function ReportImportModal({ onClose, onImported, clients }) {
     for (let i = 0; i < matchedRows.length; i++) {
       setImportProgress(i + 1);
       const r = matchedRows[i];
+      if (r.revenueInvalid) {
+        outcomes.push({ company: r.client.company, success: false, error: "Annual Revenue isn't a number — row skipped" });
+        continue;
+      }
       const patch = {};
       if (r.acraStatus !== null) patch.acraStatus = r.acraStatus;
       if (r.taxNotes !== null) patch.taxNotes = r.taxNotes;
       if (r.pendingWork !== null) patch.pendingWork = r.pendingWork;
       if (r.annualRevenue !== undefined) patch.annualRevenue = r.annualRevenue;
+      if (Object.keys(patch).length === 0) {
+        // None of the report-field columns were present for this row (e.g. an
+        // older export template) — nothing to send, and PATCHing an empty
+        // object just gets a 400 that reads like every client failed.
+        outcomes.push({ company: r.client.company, success: true, note: "No report-field columns to update — skipped" });
+        continue;
+      }
       try {
         await updateClientReportFields(r.client.id, patch);
         outcomes.push({ company: r.client.company, success: true });
@@ -3588,6 +3632,7 @@ function ReportImportModal({ onClose, onImported, clients }) {
                   {r.success ? <CheckCircle2 size={13} color="#2F6F62" /> : <AlertCircle size={13} color="#A63D40" />}
                   <span>{r.company}</span>
                   {!r.success && <span style={{ color: "#A63D40" }}> — {r.error}</span>}
+                  {r.success && r.note && <span style={{ color: "#8A8577" }}> — {r.note}</span>}
                 </div>
               ))}
             </div>
