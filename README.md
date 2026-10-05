@@ -1,4 +1,4 @@
-# Financial Asset Management System — Nav Ventures / Mohan Management project
+# Financial Asset Management System — Nav Ventures project
 
 ## What's in here
 
