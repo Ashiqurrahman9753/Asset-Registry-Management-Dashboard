@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip } from "lucide-react";
-import Login from "./Login.jsx";
+import Login, { FirstRunSetup } from "./Login.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   getStoredUser,
   clearSession,
+  fetchSetupStatus,
   fetchClients,
   fetchDocuments,
   fetchAccessLog,
@@ -299,9 +300,20 @@ function BoxLabel({ entry }) {
 
 export default function App() {
   const [user, setUser] = useState(() => getStoredUser());
+  // null = still checking, true = empty database (brand-new install), false = normal login.
+  // Skipped entirely once a session token already exists.
+  const [needsSetup, setNeedsSetup] = useState(null);
+
+  useEffect(() => {
+    if (user) return;
+    fetchSetupStatus()
+      .then((res) => setNeedsSetup(!!res.needsSetup))
+      .catch(() => setNeedsSetup(false)); // if the check itself fails, fall back to the normal login screen
+  }, [user]);
 
   if (!user) {
-    return <Login onLoggedIn={setUser} />;
+    if (needsSetup === null) return null; // avoid a login-screen flash while this loads
+    return needsSetup ? <FirstRunSetup onLoggedIn={setUser} /> : <Login onLoggedIn={setUser} />;
   }
 
   return <Dashboard user={user} onLogout={() => { clearSession(); setUser(null); }} />;
