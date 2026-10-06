@@ -62,6 +62,13 @@ function startBackend() {
         ELECTRON_RUN_AS_NODE: "1",
         DATABASE_URL: `postgres://postgres@127.0.0.1:${PGLITE_PORT}/postgres`,
         PGSSL: "false",
+        // PGlite only processes one query at a time — pg's normal pool of
+        // concurrent connections against it causes "Connection terminated
+        // unexpectedly" errors under simultaneous requests (confirmed: the
+        // dashboard's own page-load, which fires 4+ requests at once, 500s
+        // on /api/documents, /api/access-log and /api/schedules without
+        // this). Force everything through a single connection.
+        PG_POOL_MAX: "1",
         PORT: String(SERVER_PORT),
         FAMS_JWT_SECRET: getOrCreateJwtSecret(),
         SERVE_DASHBOARD: path.relative(serverDir, dashboardDist),

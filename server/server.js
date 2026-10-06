@@ -49,6 +49,15 @@ const pool = new Pool({
   // Managed providers (Neon, Supabase, RDS, ...) require TLS; a local dev
   // Postgres normally doesn't have a cert to validate, so this is opt-in.
   ssl: process.env.PGSSL === "true" ? { rejectUnauthorized: false } : false,
+  // PGlite (the desktop build's embedded database) only processes one query
+  // at a time — pglite-socket doesn't multiplex the way a real Postgres
+  // server does, so opening pg's normal pool of concurrent connections
+  // against it causes random "Connection terminated unexpectedly" errors
+  // under the simultaneous requests a dashboard page load fires off. The
+  // Electron shell sets PG_POOL_MAX=1 to force everything through one
+  // connection; a real Postgres (cloud/dev) is unaffected since this is
+  // undefined there, leaving pg's own default pool size.
+  ...(process.env.PG_POOL_MAX ? { max: Number(process.env.PG_POOL_MAX) } : {}),
 });
 
 async function initSchema() {
@@ -156,6 +165,41 @@ app.post("/api/login", async (req, res, next) => {
 
     const token = jwt.sign({ sub: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "12h" });
     res.json({ token, username: user.username, role: user.role });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A freshly installed desktop app has an empty database and no login —
+// there's no terminal access on the client's machine to run a setup
+// script, so the dashboard needs a public way to ask "does this install
+// need its first account?" and to create exactly one admin account if so.
+app.get("/api/setup-status", async (req, res, next) => {
+  try {
+    const row = await dbGet("SELECT COUNT(*) AS n FROM users");
+    res.json({ needsSetup: Number(row.n) === 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/setup", async (req, res, next) => {
+  try {
+    const row = await dbGet("SELECT COUNT(*) AS n FROM users");
+    if (Number(row.n) > 0) {
+      return res.status(403).json({ error: "This install already has an account — use the login screen." });
+    }
+    const { username, password } = req.body;
+    if (!username || !String(username).trim() || !password || String(password).length < 8) {
+      return res.status(400).json({ error: "Username and an 8+ character password are required" });
+    }
+    const hash = bcrypt.hashSync(password, 10);
+    const user = await dbGet(
+      "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin') RETURNING *",
+      [String(username).trim(), hash]
+    );
+    const token = jwt.sign({ sub: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "12h" });
+    res.status(201).json({ token, username: user.username, role: user.role });
   } catch (err) {
     next(err);
   }
