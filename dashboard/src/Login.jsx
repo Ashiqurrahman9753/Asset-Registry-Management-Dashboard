@@ -73,6 +73,7 @@ export default function Login({ onLoggedIn }) {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             style={inputStyle}
+            autoComplete="username"
             autoFocus
           />
         </label>
@@ -83,6 +84,7 @@ export default function Login({ onLoggedIn }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={inputStyle}
+            autoComplete="current-password"
           />
         </label>
 
@@ -197,6 +199,7 @@ export function FirstRunSetup({ onLoggedIn }) {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             style={inputStyle}
+            autoComplete="username"
             autoFocus
           />
         </label>
@@ -207,6 +210,7 @@ export function FirstRunSetup({ onLoggedIn }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={inputStyle}
+            autoComplete="new-password"
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#4A4638" }}>
@@ -216,6 +220,7 @@ export function FirstRunSetup({ onLoggedIn }) {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             style={inputStyle}
+            autoComplete="new-password"
           />
         </label>
 

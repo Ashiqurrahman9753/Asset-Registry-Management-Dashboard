@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip } from "lucide-react";
+import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip, KeyRound } from "lucide-react";
 import Login, { FirstRunSetup } from "./Login.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
@@ -28,6 +28,7 @@ import {
   uploadDocumentFile,
   deleteDocumentFile,
   openDocumentFile,
+  changePassword,
   ApiError,
 } from "./api.js";
 
@@ -2457,6 +2458,7 @@ function DirectorsInput({ value, onChange }) {
 
 function UserMenu({ user, onLogout }) {
   const [open, setOpen] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -2482,11 +2484,20 @@ function UserMenu({ user, onLogout }) {
             top: "calc(100% + 6px)",
             right: 0,
             ...glassPanel(0.92, 16),
-            minWidth: 160,
+            minWidth: 180,
             boxShadow: "0 12px 28px rgba(0,0,0,0.25)",
             zIndex: 30,
           }}
         >
+          <button
+            onClick={() => {
+              setOpen(false);
+              setShowChangePassword(true);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#1C2430" }}
+          >
+            <KeyRound size={14} /> Change password
+          </button>
           <button
             onClick={() => {
               setOpen(false);
@@ -2498,6 +2509,118 @@ function UserMenu({ user, onLogout }) {
           </button>
         </div>
       )}
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
+    </div>
+  );
+}
+
+function ChangePasswordModal({ onClose }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(ev) {
+    ev.preventDefault();
+    setError("");
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New passwords don't match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setSuccess(true);
+    } catch (err) {
+      setError(err.message || "Couldn't change the password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(28,36,48,0.45)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        style={{ ...glassPanel(0.96, 18), padding: "24px 26px", width: 360, display: "flex", flexDirection: "column", gap: 12 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1C2430" }}>Change password</div>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: "#8A8577" }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {success ? (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2F6F62", fontSize: 13 }}>
+              <CheckCircle2 size={16} /> Password changed.
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ marginTop: 6, background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            >
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#4A4638" }}>
+              Current password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                style={inputStyle}
+                autoFocus
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#4A4638" }}>
+              New password
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#4A4638" }}>
+              Confirm new password
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+
+            {error && (
+              <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              style={{ marginTop: 6, background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.7 : 1 }}
+            >
+              {busy ? "Changing…" : "Change password"}
+            </button>
+          </>
+        )}
+      </form>
     </div>
   );
 }

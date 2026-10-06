@@ -61,6 +61,10 @@ export function login(username, password) {
   return request("/api/login", { method: "POST", body: JSON.stringify({ username, password }) });
 }
 
+export function changePassword(currentPassword, newPassword) {
+  return request("/api/users/me/password", { method: "PATCH", body: JSON.stringify({ currentPassword, newPassword }) });
+}
+
 export function fetchSetupStatus() {
   return request("/api/setup-status");
 }
