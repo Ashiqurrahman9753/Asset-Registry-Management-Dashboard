@@ -47,7 +47,8 @@
     "publish": {
       "provider": "github",
       "owner": "Ashiqurrahman9753",
-      "repo": "Asset-Registry-Management-Dashboard"
+      "repo": "Asset-Registry-Management-Dashboard",
+      "releaseType": "release"
     }
   }
 }
