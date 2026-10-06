@@ -4,12 +4,21 @@
 // data should only ever be created deliberately, by someone with access
 // to this machine, not from a form on the internet.
 
+require("dotenv").config();
+
 const readline = require("readline");
 const bcrypt = require("bcryptjs");
-const Database = require("better-sqlite3");
-const path = require("path");
+const { Pool } = require("pg");
 
-const db = new Database(path.join(__dirname, "fams.db"));
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is not set. Point it at your Postgres instance first.");
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.PGSSL === "true" ? { rejectUnauthorized: false } : false,
+});
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -29,10 +38,11 @@ function ask(question) {
 
   const hash = bcrypt.hashSync(password, 10);
   try {
-    db.prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')").run(username, hash);
+    await pool.query("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin')", [username, hash]);
     console.log(`\nAdmin account "${username}" created. You can now log in from the dashboard.`);
   } catch (err) {
     console.error("\nCould not create that account — username may already exist.");
   }
   rl.close();
+  await pool.end();
 })();

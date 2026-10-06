@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Lock } from "lucide-react";
 import { login, saveSession } from "./api.js";
+import { Wallpaper, glassPanel, BRAND_GREEN, BRAND_GREEN_DEEP } from "./theme.jsx";
 
 export default function Login({ onLoggedIn }) {
   const [username, setUsername] = useState("");
@@ -28,29 +29,40 @@ export default function Login({ onLoggedIn }) {
     <div
       style={{
         fontFamily: "'Inter', system-ui, sans-serif",
-        background: "#EDEAE2",
         minHeight: "100vh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        position: "relative",
       }}
     >
+      <Wallpaper />
       <form
         onSubmit={submit}
         style={{
-          background: "#FBFAF6",
-          border: "1px solid #C9C4B6",
-          padding: "32px 28px",
-          width: 340,
+          ...glassPanel(0.68, 22),
+          padding: "36px 32px",
+          width: 360,
           display: "flex",
           flexDirection: "column",
           gap: 14,
+          position: "relative",
+          zIndex: 1,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-          <Lock size={18} color="#9C7A3C" />
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700, color: "#1C2430" }}>
-            Financial Asset Register
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", marginBottom: 6 }}>
+          <img
+            src="/jardeen-logo.png"
+            alt=""
+            style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 10 }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
+          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700, color: "#1C2430", letterSpacing: 0.3 }}>
+            JARDEEN MANAGEMENT
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <Lock size={12} color={BRAND_GREEN} />
+            <div style={{ fontSize: 12, color: "#6B6656", letterSpacing: 0.4 }}>Financial Asset Register</div>
           </div>
         </div>
         <div style={{ fontSize: 12, color: "#6B6656", marginBottom: 6 }}>Log in to continue.</div>
@@ -85,7 +97,7 @@ export default function Login({ onLoggedIn }) {
           disabled={busy}
           style={{
             marginTop: 6,
-            background: "#1C2430",
+            background: BRAND_GREEN_DEEP,
             color: "#EDEAE2",
             border: "none",
             padding: "10px 16px",

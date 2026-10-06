@@ -1,0 +1,53 @@
+{
+  "name": "fams-desktop",
+  "version": "1.0.0",
+  "description": "Jardeen Management — Financial Asset Register (desktop build)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:dashboard": "npm --prefix ../dashboard run build",
+    "dist:win": "npm run build:dashboard && electron-builder --win --publish never",
+    "release": "npm run build:dashboard && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
+    "electron-updater": "^6.8.9",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "sg.jardeen.fams",
+    "productName": "Jardeen FAMS",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "asar": true,
+    "files": [
+      "main.js",
+      "!**/node_modules/electron-builder/**",
+      "!**/node_modules/electron/**"
+    ],
+    "extraResources": [
+      { "from": "../server", "to": "server", "filter": ["**/*", "!.env", "!backups/**", "!uploads/**"] },
+      { "from": "../dashboard/dist", "to": "dashboard-dist" }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Ashiqurrahman9753",
+      "repo": "Asset-Registry-Management-Dashboard"
+    }
+  }
+}

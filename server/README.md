@@ -1,18 +1,31 @@
 # FAMS backend
 
-A small local API for the Financial Asset Management System. Single SQLite
-file (`fams.db`), no separate database server to install or maintain —
-now with logins, an audit trail, and automatic backups.
+The API for the Financial Asset Management System, backed by PostgreSQL —
+logins, an audit trail, and automatic backups included.
 
-## Setup (Ubuntu now, Windows later — same steps, Node is cross-platform)
+## Setup
+
+You need a Postgres database to point at. For local development, any
+Postgres 13+ works (a local install, or a throwaway Docker container). For
+going live, see "Choosing a database provider" below.
 
 ```bash
 npm install
-npm start
+DATABASE_URL="postgres://user:password@host:5432/dbname" npm start
 ```
 
-This creates `fams.db` next to `server.js` on first run and starts the API
-on **http://localhost:4000**.
+Or put it in a `.env`-style export before running `npm start` — either
+way, **never commit `DATABASE_URL` or `FAMS_JWT_SECRET` to git**. The schema
+is created automatically on first connect (`CREATE TABLE IF NOT EXISTS`, so
+it's always safe to re-run).
+
+Two environment variables matter:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | yes | Postgres connection string |
+| `PGSSL` | only for managed providers | Set to `true` for Neon/Supabase/RDS/etc. — they require TLS. Leave unset for a local dev Postgres. |
+| `FAMS_JWT_SECRET` | for production | Signs login tokens. Falls back to a well-known dev value locally — **must** be set to a real random secret before this is reachable from the internet. |
 
 ## Create your first login
 
@@ -21,7 +34,7 @@ accounts should only be created deliberately by someone at the keyboard,
 not through a form anyone on the internet could reach.
 
 ```bash
-node create-admin.js
+DATABASE_URL="..." node create-admin.js
 ```
 
 Follow the prompts (username + password, 8 characters minimum). Once
@@ -51,10 +64,11 @@ Tokens expire after 12 hours — staff log in once a day, not once per click.
 - **Every login attempt is recorded** (`login_log`), success or failure —
   so if something looks wrong later, you can see exactly who accessed the
   system and when, not just who claimed to.
-- **Two roles**: `admin` can create new staff logins and view the login log;
-  `staff` can use the register normally. Given it's a 2-person office, this
-  is intentionally simple — the owner/admin controls who gets an account at
-  all, which is the main thing worth gating.
+- **Every edit to client particulars is recorded** (`client_edit_log`) —
+  field, old value, new value, who, when. Editing is admin-only
+  (`PATCH /api/clients/:id`).
+- **Two roles**: `admin` can create new staff logins, view the login log,
+  and edit client particulars; `staff` can use the register normally.
 
 Add a second staff login (as an admin, once logged in):
 ```bash
@@ -64,45 +78,56 @@ curl -X POST http://localhost:4000/api/users \
   -d '{"username":"staffname","password":"theirpassword","role":"staff"}'
 ```
 
+## Choosing a database provider for going live
+
+The app talks to Postgres through a single `DATABASE_URL` — any standard
+Postgres host works, no code changes needed to switch providers. For a
+2-person office at this scale (a few hundred clients, low traffic), a
+managed serverless Postgres is the practical choice over running your own
+server:
+
+- **Neon** or **Supabase** — both have a free tier that comfortably covers
+  this app's data volume, both include automated backups and TLS by
+  default, and both hand you a connection string to paste into
+  `DATABASE_URL`. Supabase adds extra features (auth, storage, realtime)
+  this app doesn't use; Neon is Postgres-only and slightly simpler if you
+  don't need those. Either is a reasonable pick — this is not a decision
+  that locks you in, since the app only depends on standard Postgres.
+- You'll also need somewhere to run the Express API itself (Render,
+  Railway, or Fly.io all work) unless your database provider also offers
+  app hosting.
+
+Whichever you choose, set `PGSSL=true` and use a real random
+`FAMS_JWT_SECRET` before the app is reachable from the public internet.
+
 ## Automatic backups — the safety net
 
 ```bash
-node backup.js
+DATABASE_URL="..." node backup.js
 ```
 
-Copies `fams.db` into a timestamped file under `backups/`, and automatically
-deletes anything older than the last 14 backups.
+Dumps the database to a timestamped `.sql` file under `backups/` (via
+`pg_dump` — install the `postgresql-client` package if it's not already on
+your machine), and automatically deletes anything older than the last 14
+backups. Managed providers like Neon/Supabase already keep their own
+backups, but an independent, portable copy is worth having regardless —
+it isn't tied to any one provider.
 
-**Schedule it to run nightly** so a hardware failure never costs you more
-than a day of data:
+**Schedule it to run nightly:**
 
 - **On Ubuntu (now, for testing):**
   ```bash
   crontab -e
   # add this line — runs every night at 11pm:
-  0 23 * * * cd /path/to/fams-server && node backup.js
+  0 23 * * * cd /path/to/fams-server && DATABASE_URL="..." node backup.js
   ```
 - **On Windows (production):** use Task Scheduler → create a basic task →
   trigger "Daily" → action "Start a program" → program `node.exe`,
-  arguments `backup.js`, start-in folder set to the `fams-server` directory.
+  arguments `backup.js`, start-in folder set to the `fams-server`
+  directory, with `DATABASE_URL` set in the task's environment.
 
 For extra safety, periodically copy the `backups/` folder itself onto a USB
-drive or a personal cloud-sync folder (Google Drive/OneDrive) — that
-protects you even if the whole office PC is lost, not just the drive.
-
-## Further hardening, if you want to go further later
-
-The database file itself is currently unencrypted on disk — anyone with
-direct file access to the PC could open `fams.db` with any SQLite tool.
-Two options, roughly in order of effort:
-
-1. **Turn on full-disk encryption** on the office PC (BitLocker on Windows,
-   LUKS on Linux). This is the easiest win — it protects the file at rest
-   if the PC or its drive is physically stolen, with no code changes needed.
-2. **Switch to SQLCipher** (an encrypted drop-in replacement for SQLite) —
-   this means the database file is unreadable without a passphrase even if
-   copied off the machine. More setup effort (native build step), worth it
-   once the system is in daily use with real client data.
+drive or a personal cloud-sync folder (Google Drive/OneDrive).
 
 ## Endpoints
 
@@ -110,19 +135,14 @@ Two options, roughly in order of effort:
 |---|---|---|---|
 | POST | `/api/login` | — | Log in, get a token |
 | GET | `/api/clients` | required | List all clients |
-| POST | `/api/clients` | required | Add a client |
+| POST | `/api/clients` | required | Add a client (file number assigned automatically) |
+| PATCH | `/api/clients/:id` | admin only | Edit client particulars (every changed field is audit-logged) |
+| GET | `/api/clients/:id/edit-log` | admin only | Edit history for a client |
 | GET | `/api/documents` | required | List documents (filter with `?clientId=`, `?category=`, `?q=`) |
 | POST | `/api/documents` | required | Log a new document |
-| GET | `/api/documents/lookup/:code` | required | Scan/search lookup by unique ID |
+| GET | `/api/documents/lookup/:code` | required | Scan/search lookup by unique ID — returns the full client snapshot |
 | POST | `/api/documents/:id/toggle-checkout` | required | Check a document out or back in |
 | GET | `/api/access-log` | required | Recent check-out/check-in history |
 | GET | `/api/users` | admin only | List staff logins |
 | POST | `/api/users` | admin only | Create a new staff login |
 | GET | `/api/login-log` | admin only | Recent login attempts, success and failure |
-
-## Next step
-
-The React dashboard prototype currently holds its data in memory (`useState`)
-and has no login screen. Once this backend is running, the dashboard needs:
-a login screen that stores the returned token, and every existing `fetch`
-call updated to send `Authorization: Bearer <token>`.

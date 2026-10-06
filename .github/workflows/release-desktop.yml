@@ -1,0 +1,42 @@
+name: Build & release desktop app
+
+# Push a version tag (e.g. v1.1.0) once you're satisfied with what you've
+# tested — this builds the Windows installer on a real Windows runner and
+# publishes it as a GitHub Release. Every already-installed copy of the app
+# checks this release channel and updates itself; no manual step on the
+# client's end.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dashboard dependencies
+        run: npm install
+        working-directory: dashboard
+
+      - name: Install server dependencies
+        run: npm install --omit=dev
+        working-directory: server
+
+      - name: Install electron dependencies
+        run: npm install
+        working-directory: electron
+
+      - name: Build and publish
+        run: npm run release
+        working-directory: electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
