@@ -1,4 +1,4 @@
-# Financial Asset Management System — Nav Ventures project
+# FAMS — Financial Asset Management System
 
 ## What's in here
 
