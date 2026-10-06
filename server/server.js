@@ -255,6 +255,27 @@ app.post("/api/users", requireAdmin, async (req, res, next) => {
   }
 });
 
+// Self-service — any logged-in user can change their OWN password (not
+// gated admin-only like creating new logins above). Requires the current
+// password, same as changing a password on any normal account.
+app.patch("/api/users/me/password", async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: "Current password and a new password (8+ characters) are required" });
+    }
+    const user = await dbGet("SELECT * FROM users WHERE id = $1", [req.user.sub]);
+    if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await dbRun("UPDATE users SET password_hash = $1 WHERE id = $2", [hash, user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/api/login-log", requireAdmin, async (req, res, next) => {
   try {
     res.json(await dbAll("SELECT * FROM login_log ORDER BY logged_at DESC LIMIT 100"));
