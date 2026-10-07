@@ -58,6 +58,16 @@ const pool = new Pool({
   // connection; a real Postgres (cloud/dev) is unaffected since this is
   // undefined there, leaving pg's own default pool size.
   ...(process.env.PG_POOL_MAX ? { max: Number(process.env.PG_POOL_MAX) } : {}),
+  // With only one connection in the pool, anything that gets that
+  // connection stuck (a hung query, a transaction that never commits or
+  // rolls back) blocks every other request indefinitely — including ones
+  // completely unrelated to whatever got stuck, since they're all queued
+  // behind the same single connection. These bound how long that can last:
+  // a query/transaction that doesn't finish in time is killed, freeing the
+  // connection back up, instead of the whole app silently hanging forever.
+  statement_timeout: 20000,
+  idle_in_transaction_session_timeout: 20000,
+  connectionTimeoutMillis: 15000,
 });
 
 async function initSchema() {
