@@ -34,6 +34,17 @@ function userDataPath(...segments) {
   return path.join(app.getPath("userData"), ...segments);
 }
 
+// A packaged Windows app has no visible console — every console.log/error
+// from here and from the spawned backend otherwise vanishes with nothing
+// to debug from. Everything also goes to a log file so a failure can
+// actually be diagnosed after the fact instead of guessed at.
+let logStream;
+function log(...args) {
+  const line = `[${new Date().toISOString()}] ${args.map((a) => (a instanceof Error ? a.stack : String(a))).join(" ")}`;
+  console.log(line);
+  if (logStream) logStream.write(line + "\n");
+}
+
 async function startPGlite() {
   const { PGlite } = require("@electric-sql/pglite");
   const { PGLiteSocketServer } = require("@electric-sql/pglite-socket");
@@ -42,9 +53,17 @@ async function startPGlite() {
   fs.mkdirSync(dbDir, { recursive: true });
 
   pgliteDb = new PGlite(dbDir);
+  // new PGlite(dbDir) returns before the database is actually ready to
+  // accept queries — on a brand-new data directory (every client's very
+  // first launch) its own internal bootstrap takes real time. Without this,
+  // the socket server starts accepting connections immediately, and the
+  // backend's first query can race ahead of PGlite actually being ready —
+  // confirmed as the cause of a real "backend did not start" failure on a
+  // first-ever install.
+  await pgliteDb.waitReady;
   pgliteServer = new PGLiteSocketServer({ db: pgliteDb, port: PGLITE_PORT, host: "127.0.0.1" });
   await pgliteServer.start();
-  console.log(`[FAMS] Local database ready at ${dbDir}`);
+  log(`Local database ready at ${dbDir}`);
 }
 
 function startBackend() {
@@ -80,19 +99,51 @@ function startBackend() {
       },
     });
 
+    let settled = false;
+    const recentOutput = [];
+    const remember = (line) => {
+      recentOutput.push(line);
+      if (recentOutput.length > 20) recentOutput.shift();
+    };
+
     serverProcess.stdout.on("data", (chunk) => {
       const text = chunk.toString();
-      console.log("[FAMS backend]", text.trim());
-      if (text.includes("FAMS backend running")) resolve();
+      log("[backend]", text.trim());
+      remember(text.trim());
+      if (text.includes("FAMS backend running")) {
+        settled = true;
+        resolve();
+      }
     });
-    serverProcess.stderr.on("data", (chunk) => console.error("[FAMS backend]", chunk.toString().trim()));
-    serverProcess.on("error", reject);
+    serverProcess.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      log("[backend:stderr]", text.trim());
+      remember(text.trim());
+    });
+    serverProcess.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
     serverProcess.on("exit", (code) => {
-      if (code !== 0 && code !== null) console.error(`[FAMS] backend exited with code ${code}`);
+      log(`backend exited with code ${code}`);
+      // The process dying before it ever printed "FAMS backend running" IS
+      // the failure — report it immediately instead of silently waiting out
+      // the rest of the startup timeout and showing a generic message that
+      // hides what actually went wrong.
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Backend exited (code ${code}) before starting up. Last output:\n${recentOutput.join("\n")}`));
     });
 
-    // Don't hang forever if something's wrong — surface it instead of a blank window.
-    setTimeout(() => reject(new Error("Backend did not start within 20 seconds")), 20000);
+    // Don't hang forever if something's wrong — surface it instead of a blank
+    // window. A fresh install's first launch does real PGlite bootstrap work
+    // (see startPGlite), so this allows real margin beyond that.
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Backend did not start within 60 seconds. Last output:\n${recentOutput.join("\n")}`));
+    }, 60000);
   });
 }
 
@@ -121,13 +172,22 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const logDir = userDataPath("logs");
+  fs.mkdirSync(logDir, { recursive: true });
+  logStream = fs.createWriteStream(path.join(logDir, "startup.log"), { flags: "a" });
+
   try {
     await startPGlite();
     await startBackend();
     createWindow();
     autoUpdater.checkForUpdatesAndNotify();
   } catch (err) {
-    dialog.showErrorBox("FAMS failed to start", String(err && err.stack ? err.stack : err));
+    const message = String(err && err.stack ? err.stack : err);
+    log("STARTUP FAILED:", message);
+    dialog.showErrorBox(
+      "FAMS failed to start",
+      `${message}\n\nFull startup log saved at:\n${path.join(logDir, "startup.log")}`
+    );
     app.quit();
   }
 });
