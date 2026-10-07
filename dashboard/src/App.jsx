@@ -2633,7 +2633,7 @@ const CLIENT_IMPORT_COLUMNS = [
   { key: "dateInc", label: "Date Incorporated", required: true, aliases: ["dateincorporated", "dateinc", "incorporationdate"] },
   { key: "registeredAddress", label: "Registered Address", required: true, aliases: ["registeredaddress", "address"] },
   { key: "fax", label: "Fax", required: false, aliases: ["fax", "faxnumber"] },
-  { key: "directors", label: "Directors", required: true, aliases: ["directors", "directorname", "directornames"] },
+  { key: "directors", label: "Directors", required: false, aliases: ["directors", "directorname", "directornames"] },
   { key: "contact", label: "Contact Name", required: true, aliases: ["contactname", "contact", "personincharge", "picname"] },
   { key: "contactPhone", label: "Contact Phone", required: true, aliases: ["contactphone", "phone", "picphone"] },
   { key: "contactEmail", label: "Contact Email", required: false, aliases: ["contactemail", "email", "picemail"] },

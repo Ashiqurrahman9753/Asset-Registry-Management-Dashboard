@@ -27,6 +27,7 @@ Thumbs.db
 
 # Real client data — never goes to git, even in a private repo
 /jardeenclientsimport.xlsx
+"/jardeen secretarial records (1).pdf"
 
 # Downloaded installers — built by CI and published to GitHub Releases,
 # never committed to the repo itself
