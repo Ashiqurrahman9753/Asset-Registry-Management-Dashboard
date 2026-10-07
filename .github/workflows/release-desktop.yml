@@ -31,6 +31,17 @@ jobs:
         run: npm install --omit=dev
         working-directory: server
 
+      # Diagnosing a real failure (v1.0.2: packaged app couldn't find the
+      # 'dotenv' module at runtime) — confirm npm actually installed it here
+      # before blaming electron-builder's packaging step for dropping it.
+      - name: Diagnostic -- confirm dotenv installed by npm
+        shell: bash
+        run: |
+          echo "server/node_modules/dotenv contents:"
+          ls -la server/node_modules/dotenv || echo "MISSING after npm install"
+          echo "server/node_modules top-level package count:"
+          ls server/node_modules | wc -l
+
       - name: Install electron dependencies
         run: npm install
         working-directory: electron
@@ -57,6 +68,14 @@ jobs:
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Diagnostic -- confirm dotenv made it into the packaged resources
+        shell: bash
+        run: |
+          echo "packaged resources/server/node_modules/dotenv:"
+          ls -la electron/dist/win-unpacked/resources/server/node_modules/dotenv || echo "MISSING from packaged output"
+          echo "packaged resources/server/node_modules top-level package count:"
+          ls electron/dist/win-unpacked/resources/server/node_modules | wc -l
 
       # Belt and braces: don't rely on any tool's draft-vs-published default
       # (electron-builder's own release-creation path published correctly
