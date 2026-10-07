@@ -57,22 +57,28 @@ export function Wallpaper() {
 }
 
 // Light glass surface — cards, panels, tiles, table containers.
-export function glassPanel(opacity = 0.62, blur = 16) {
+// backdrop-filter: blur() is intentionally not used here (or anywhere else
+// in the app — see every modal overlay too). It's a known source of
+// Chromium GPU-compositor instability on some Windows driver combinations;
+// confirmed on a real client machine as the cause of both a GPU-process
+// freeze and, after disabling hardware acceleration to fix that, a
+// different failure where panels stopped dimming/obscuring the content
+// behind them at all (backdrop-filter silently not compositing under
+// software rendering). A plain semi-opaque background has no such
+// dependency — it works the same regardless of GPU/driver/acceleration
+// state, at the cost of the frosted-glass blur look.
+export function glassPanel(opacity = 0.62) {
   return {
     background: `rgba(251,250,246,${opacity})`,
-    backdropFilter: `blur(${blur}px)`,
-    WebkitBackdropFilter: `blur(${blur}px)`,
     border: "1px solid rgba(201,196,182,0.55)",
     boxShadow: "0 8px 28px rgba(28,36,48,0.09)",
   };
 }
 
 // Dark glass surface — header bar, dark UI chrome.
-export function glassDark(opacity = 0.62, blur = 18) {
+export function glassDark(opacity = 0.62) {
   return {
     background: `rgba(28,36,48,${opacity})`,
-    backdropFilter: `blur(${blur}px)`,
-    WebkitBackdropFilter: `blur(${blur}px)`,
     border: "1px solid rgba(255,255,255,0.08)",
   };
 }
