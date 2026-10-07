@@ -11,6 +11,15 @@ const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
 
+// Some Windows GPU/driver combinations have real stability problems with
+// Chromium's GPU compositor — this app leans on backdrop-filter: blur() for
+// every modal overlay, which is exactly the kind of effect that triggers it.
+// Symptoms look like visual corruption (ghosting, stale frames bleeding
+// through) and, once the GPU process is in that state, clicks stop
+// registering reliably too, since the renderer is stuck mid-repaint. This
+// must be called before the app is ready.
+app.disableHardwareAcceleration();
+
 // Node 18 (this dev machine) lacks global CustomEvent; Electron's bundled
 // Node is modern enough not to need this, but the shim is harmless either
 // way and keeps `npm start` here working the same as the packaged app.
