@@ -35,6 +35,23 @@ jobs:
         run: npm install
         working-directory: electron
 
+      # electron-builder has a known race condition: when the GitHub release
+      # for this tag doesn't exist yet, it tries to create it while uploading
+      # several files in parallel, and the create can lose that race for some
+      # of them — they fail to upload with no non-zero exit code to show for
+      # it (confirmed: v1.0.1's installer itself silently failed to upload
+      # this way, leaving only the small .blockmap file on the release).
+      # Creating the release first means electron-builder always hits the
+      # reliable "upload to an existing release" path instead.
+      - name: Ensure the GitHub release exists before uploading to it
+        shell: bash
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and publish
         run: npm run release
         working-directory: electron
