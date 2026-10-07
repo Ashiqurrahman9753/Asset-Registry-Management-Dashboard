@@ -1,6 +1,6 @@
 {
   "name": "fams-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Jardeen Management — Financial Asset Register (desktop build)",
   "main": "main.js",
   "private": true,
