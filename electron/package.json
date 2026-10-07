@@ -27,6 +27,7 @@
     "productName": "Jardeen FAMS",
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "asar": true,
+    "afterPack": "afterPack.js",
     "files": [
       "main.js",
       "!**/node_modules/electron-builder/**",
