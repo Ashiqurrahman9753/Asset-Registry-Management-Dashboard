@@ -57,3 +57,13 @@ jobs:
         working-directory: electron
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Belt and braces: don't rely on any tool's draft-vs-published default
+      # (electron-builder's own release-creation path published correctly
+      # here before; gh release create's did not) — force it explicitly
+      # every time, after the build has actually uploaded the real assets.
+      - name: Ensure the release is published, not left as a draft
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
