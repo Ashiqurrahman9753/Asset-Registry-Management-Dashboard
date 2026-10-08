@@ -1,3 +1,4 @@
 {
+  "1.0.11": "• Maintenance release to confirm the new in-app update flow works end to end. No changes to your data or day-to-day features.",
   "1.0.10": "• In-app updates: you'll now be asked before an update is installed, with a short summary of what changed.\n• Import clients: fixed the file selection not responding, and the import now reads the \"Clients\" sheet even when it isn't the first sheet in the workbook.\n• Clearer error messages when an import file can't be read."
 }
