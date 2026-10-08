@@ -2748,6 +2748,7 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
   const skippedRows = rows.filter((r) => r.missing.length > 0 || r.duplicate);
 
   async function handleFile(file) {
+    console.log("Import file selected:", file.name, file.size);
     setParseError("");
     setFileName(file.name);
     try {
@@ -2768,8 +2769,9 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
       });
       setRows(mapped);
       setStep("preview");
-    } catch {
-      setParseError("Couldn't read this file — make sure it's a valid .xlsx, .xls, or .csv file.");
+    } catch (err) {
+      console.error("Import file read failed:", err);
+      setParseError(`Couldn't read this file (${err?.message || "unknown error"}) — make sure it's a valid .xlsx, .xls, or .csv file.`);
     }
   }
 
@@ -2804,6 +2806,7 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
       style={{
         position: "fixed",
         inset: 0,
+        zIndex: 55,
         background: "rgba(28,36,48,0.72)",
         display: "flex",
         alignItems: "center",
@@ -2850,7 +2853,13 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
                 ref={fileInputRef}
                 type="file"
                 accept=".xlsx,.xls,.csv"
-                onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  // Clear the value so picking the same file twice still fires onChange.
+                  const f = e.target.files[0];
+                  e.target.value = "";
+                  if (f) handleFile(f);
+                }}
                 style={{ display: "none" }}
               />
             </div>
@@ -3555,6 +3564,7 @@ function ReportImportModal({ onClose, onImported, clients }) {
   const fileInputRef = useRef(null);
 
   async function handleFile(file) {
+    console.log("Import file selected:", file.name, file.size);
     setParseError("");
     setFileName(file.name);
     try {
@@ -3593,8 +3603,9 @@ function ReportImportModal({ onClose, onImported, clients }) {
       });
       setRows(mapped);
       setStep("preview");
-    } catch {
-      setParseError("Couldn't read this file — make sure it's a valid .xlsx, .xls, or .csv file.");
+    } catch (err) {
+      console.error("Import file read failed:", err);
+      setParseError(`Couldn't read this file (${err?.message || "unknown error"}) — make sure it's a valid .xlsx, .xls, or .csv file.`);
     }
   }
 
@@ -3688,7 +3699,13 @@ function ReportImportModal({ onClose, onImported, clients }) {
                 ref={fileInputRef}
                 type="file"
                 accept=".xlsx,.xls,.csv"
-                onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  // Clear the value so picking the same file twice still fires onChange.
+                  const f = e.target.files[0];
+                  e.target.value = "";
+                  if (f) handleFile(f);
+                }}
                 style={{ display: "none" }}
               />
             </div>
