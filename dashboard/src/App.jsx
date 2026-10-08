@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import * as XLSX from "xlsx";
 import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip, KeyRound } from "lucide-react";
 import Login, { FirstRunSetup } from "./Login.jsx";
+import UpdateManager from "./UpdateManager.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   getStoredUser,
@@ -317,7 +318,12 @@ export default function App() {
     return needsSetup ? <FirstRunSetup onLoggedIn={setUser} /> : <Login onLoggedIn={setUser} />;
   }
 
-  return <Dashboard user={user} onLogout={() => { clearSession(); setUser(null); }} />;
+  return (
+    <>
+      <Dashboard user={user} onLogout={() => { clearSession(); setUser(null); }} />
+      <UpdateManager />
+    </>
+  );
 }
 
 function Dashboard({ user, onLogout }) {
@@ -2704,6 +2710,22 @@ function mapRawRowToClient(rawRow) {
   return { data, missing };
 }
 
+// Workbooks often carry a "READ ME" or notes sheet ahead of the data. Rather
+// than blindly using the first sheet, take the one whose headers best match
+// the client columns (ties go to the earlier sheet), falling back to sheet 1.
+function pickClientSheetRows(workbook) {
+  const required = CLIENT_IMPORT_COLUMNS.filter((c) => c.required);
+  let best = { score: -1, rows: [] };
+  for (const name of workbook.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { defval: "" });
+    if (rows.length === 0) continue;
+    const headers = new Set(Object.keys(rows[0]).map(normalizeHeader));
+    const score = required.filter((c) => c.aliases.some((a) => headers.has(a))).length;
+    if (score > best.score) best = { score, rows };
+  }
+  return best.rows;
+}
+
 function downloadClientImportTemplate() {
   const headers = CLIENT_IMPORT_COLUMNS.map((c) => c.label);
   const example = [
@@ -2754,8 +2776,7 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
     try {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const rawRows = pickClientSheetRows(workbook);
       if (rawRows.length === 0) {
         setParseError("No rows found — make sure the first row has column headers.");
         return;
