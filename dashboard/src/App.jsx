@@ -777,12 +777,23 @@ function Dashboard({ user, onLogout }) {
 
   async function submitForm(ev) {
     ev.preventDefault();
-    if (!form.clientId || !form.location.trim() || !form.dateReceived || !form.loggedBy.trim()) return;
-    if (form.isBatch) {
-      if (form.checkedItems.length === 0) return;
-    } else if (form.category === "bookkeeping" && !form.bookkeepingSubtype) {
+    // Each of these used to just silently `return` with zero feedback —
+    // on a form this long, a missed required field (easy to do: Storage
+    // location defaults to a disabled, unselected placeholder) meant
+    // clicking Submit appeared to do nothing at all, indistinguishable
+    // from a genuine freeze. Say exactly what's missing instead.
+    const missing = [];
+    if (!form.clientId) missing.push("Client");
+    if (!form.location.trim()) missing.push("Storage location");
+    if (!form.dateReceived) missing.push("Date received");
+    if (!form.loggedBy.trim()) missing.push("Logged by");
+    if (form.isBatch && form.checkedItems.length === 0) missing.push("At least one checklist item");
+    if (!form.isBatch && form.category === "bookkeeping" && !form.bookkeepingSubtype) missing.push("Document type");
+    if (missing.length > 0) {
+      setErrorMsg(`Please fill in: ${missing.join(", ")}`);
       return;
     }
+    setErrorMsg("");
     setFormBusy(true);
     try {
       const clientName = selectedClient?.company || clients.find((c) => c.id === Number(form.clientId))?.company || "";
