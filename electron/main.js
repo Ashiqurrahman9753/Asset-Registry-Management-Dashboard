@@ -5,7 +5,7 @@
 // itself is untouched — PGlite speaks the real Postgres wire protocol
 // via pglite-socket, so DATABASE_URL just points at localhost instead
 // of the cloud.
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
@@ -167,6 +167,128 @@ function getOrCreateJwtSecret() {
   return secret;
 }
 
+// ---- In-app updates -------------------------------------------------------
+// The dashboard shows the prompts (see UpdateManager.jsx); this side only
+// checks, downloads and installs when the user has confirmed. Nothing is
+// downloaded or installed behind their back.
+const updaterState = {
+  status: "idle", // idle | available | downloading | downloaded | error
+  version: null,
+  notes: "",
+  percent: 0,
+  error: null,
+  whatsNew: null, // { version, notes } — set once, right after an update was installed
+};
+
+function setUpdaterState(patch) {
+  Object.assign(updaterState, patch);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("updater:state", updaterState);
+}
+
+// GitHub release bodies arrive as HTML (or an array of per-version notes).
+function releaseNotesToText(notes) {
+  if (!notes) return "";
+  const raw = Array.isArray(notes) ? notes.map((n) => n.note || "").join("\n\n") : String(notes);
+  return raw
+    .replace(/<\/(p|li|h\d)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// After an update has been installed and the app reopened, work out once
+// whether to show "what's new" — the installed version differs from the one
+// recorded at the last acknowledged launch. A fresh install just records it.
+function prepareWhatsNew() {
+  const versionFile = userDataPath("last-seen-version.txt");
+  const current = app.getVersion();
+  let previous = null;
+  try {
+    previous = fs.readFileSync(versionFile, "utf8").trim();
+  } catch {
+    // first launch ever
+  }
+  if (!previous) {
+    fs.writeFileSync(versionFile, current, "utf8");
+    return;
+  }
+  if (previous === current) return;
+  let notes = "";
+  try {
+    notes = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8"))[current] || "";
+  } catch (err) {
+    log("changelog read failed:", err.message);
+  }
+  updaterState.whatsNew = { version: current, notes: notes || "Bug fixes and improvements." };
+}
+
+function setupUpdater() {
+  prepareWhatsNew();
+
+  ipcMain.handle("updater:get-state", () => updaterState);
+  ipcMain.handle("updater:ack-whats-new", () => {
+    try {
+      fs.writeFileSync(userDataPath("last-seen-version.txt"), app.getVersion(), "utf8");
+    } catch (err) {
+      log("could not record seen version:", err.message);
+    }
+    setUpdaterState({ whatsNew: null });
+  });
+
+  // Updates only exist for the installed build — `npm start` has nothing to update from.
+  if (!app.isPackaged) {
+    ipcMain.handle("updater:check", () => {});
+    ipcMain.handle("updater:download", () => {});
+    ipcMain.handle("updater:install", () => {});
+    return;
+  }
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on("update-available", (info) => {
+    setUpdaterState({
+      status: "available",
+      version: info.version,
+      notes: releaseNotesToText(info.releaseNotes) || "Bug fixes and improvements.",
+      percent: 0,
+      error: null,
+    });
+  });
+  autoUpdater.on("download-progress", (p) => setUpdaterState({ status: "downloading", percent: Math.round(p.percent) }));
+  autoUpdater.on("update-downloaded", () => setUpdaterState({ status: "downloaded", percent: 100 }));
+  autoUpdater.on("error", (err) => {
+    log("updater error:", err && err.message);
+    // A failed background check shouldn't bother anyone; only surface failures once an update is in progress.
+    if (updaterState.status === "downloading" || updaterState.status === "downloaded") {
+      setUpdaterState({ status: "error", error: "The update couldn't be completed. Please try again later." });
+    }
+  });
+
+  const check = () => autoUpdater.checkForUpdates().catch((err) => log("update check failed:", err.message));
+  ipcMain.handle("updater:check", check);
+  ipcMain.handle("updater:download", () => {
+    setUpdaterState({ status: "downloading", percent: 0, error: null });
+    return autoUpdater.downloadUpdate().catch((err) => {
+      log("update download failed:", err.message);
+      setUpdaterState({ status: "error", error: "The update couldn't be downloaded. Please check the internet connection and try again." });
+    });
+  });
+  // Silent install, and don't relaunch — the user reopens the app and logs in.
+  ipcMain.handle("updater:install", () => autoUpdater.quitAndInstall(true, false));
+
+  check();
+  setInterval(() => {
+    if (updaterState.status === "idle") check();
+  }, 4 * 60 * 60 * 1000);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -174,7 +296,7 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 650,
     title: "Jardeen Management — Financial Asset Register",
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, "preload.js") },
   });
   mainWindow.loadURL(`http://localhost:${SERVER_PORT}`);
   mainWindow.on("closed", () => { mainWindow = null; });
@@ -189,7 +311,7 @@ app.whenReady().then(async () => {
     await startPGlite();
     await startBackend();
     createWindow();
-    autoUpdater.checkForUpdatesAndNotify();
+    setupUpdater();
   } catch (err) {
     const message = String(err && err.stack ? err.stack : err);
     log("STARTUP FAILED:", message);

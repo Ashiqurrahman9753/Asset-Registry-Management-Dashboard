@@ -1,6 +1,6 @@
 {
   "name": "fams-desktop",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Jardeen Management — Financial Asset Register (desktop build)",
   "main": "main.js",
   "private": true,
@@ -30,6 +30,8 @@
     "afterPack": "afterPack.js",
     "files": [
       "main.js",
+      "preload.js",
+      "changelog.json",
       "!**/node_modules/electron-builder/**",
       "!**/node_modules/electron/**",
       "!**/node_modules/bcryptjs/**"
