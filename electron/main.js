@@ -221,7 +221,7 @@ function prepareWhatsNew() {
   if (previous === current) return;
   let notes = "";
   try {
-    notes = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8"))[current] || "";
+    notes = JSON.parse(fs.readFileSync(path.join(__dirname, "notes.json"), "utf8"))[current] || "";
   } catch (err) {
     log("changelog read failed:", err.message);
   }
@@ -289,6 +289,33 @@ function setupUpdater() {
   }, 4 * 60 * 60 * 1000);
 }
 
+// Print a form's page images. The dashboard sends ready-made HTML (page images
+// sized to A4); it's shown in a hidden window just long enough to open the
+// system print dialog, so staff can print to the office printer.
+function setupPrinting() {
+  ipcMain.handle("print:html", async (_event, html) => {
+    if (typeof html !== "string" || html.length === 0 || html.length > 60 * 1024 * 1024) {
+      return { ok: false, reason: "Nothing to print" };
+    }
+    const file = path.join(app.getPath("temp"), `fams-print-${Date.now()}.html`);
+    let win;
+    try {
+      fs.writeFileSync(file, html, "utf8");
+      win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      await win.loadFile(file);
+      return await new Promise((resolve) => {
+        win.webContents.print({ silent: false, printBackground: true, margins: { marginType: "none" }, pageSize: "A4" }, (success, reason) => resolve({ ok: success, reason }));
+      });
+    } catch (err) {
+      log("print failed:", err.message);
+      return { ok: false, reason: err.message };
+    } finally {
+      if (win && !win.isDestroyed()) win.destroy();
+      fs.rm(file, { force: true }, () => {});
+    }
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -324,6 +351,7 @@ app.whenReady().then(async () => {
     await startPGlite();
     await startBackend();
     createWindow();
+    setupPrinting();
     setupUpdater();
   } catch (err) {
     const message = String(err && err.stack ? err.stack : err);

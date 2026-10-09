@@ -2,6 +2,11 @@
 // can read update state and ask for a download/install, nothing else.
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Printing a form's page images through the system print dialog.
+contextBridge.exposeInMainWorld("famsPrint", {
+  html: (html) => ipcRenderer.invoke("print:html", html),
+});
+
 contextBridge.exposeInMainWorld("famsUpdater", {
   getState: () => ipcRenderer.invoke("updater:get-state"),
   check: () => ipcRenderer.invoke("updater:check"),
