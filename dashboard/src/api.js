@@ -88,6 +88,7 @@ function mapClient(c) {
     contactPhone: c.contact_phone || "",
     contactEmail: c.contact_email || "",
     fax: c.fax || "",
+    gstRegNo: c.gst_reg_no || "",
     status: c.status,
     // Report-page working fields — not auto-fetched (see the Report tab),
     // just notes staff keep updated.
@@ -362,9 +363,190 @@ export async function openDocumentFile(fileId, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+// ---------- Document vault ----------
+
+function mapClientFile(f) {
+  return {
+    id: f.id,
+    documentId: f.document_id,
+    filename: f.filename,
+    mimeType: f.mime_type || "",
+    sizeBytes: f.size_bytes,
+    uploadedBy: f.uploaded_by,
+    uploadedAt: (f.uploaded_at || "").replace("T", " ").slice(0, 16),
+    documentCode: f.document_code,
+    category: f.category,
+    serviceDetail: f.service_detail || "",
+    dateReceived: f.date_received,
+    location: f.location,
+    documentStatus: f.document_status,
+  };
+}
+
+export async function fetchClientFiles(clientId) {
+  const rows = await request(`/api/clients/${clientId}/files`);
+  return rows.map(mapClientFile);
+}
+
+// Raw bytes of a file, fetched with the login header. Used by the vault's
+// thumbnails and viewer; the server logs each fetch as "viewed".
+export async function fetchFileBytes(fileId) {
+  const token = getToken();
+  let res;
+  try {
+    res = await fetch(`${API_URL}/api/files/${fileId}/download?action=view`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    throw new ApiError("Can't reach the server — is it running on " + API_URL + "?", 0);
+  }
+  if (!res.ok) throw new ApiError(`Could not load the file (${res.status})`, res.status);
+  return { bytes: await res.arrayBuffer(), type: res.headers.get("Content-Type") || "" };
+}
+
+// Same fetch as openDocumentFile, but saves the file instead of showing it.
+export async function downloadDocumentFile(fileId, filename) {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/api/files/${fileId}/download?action=download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(`Could not download ${filename || "file"} (${res.status})`, res.status);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "document";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 export async function fetchAccessLog() {
   const rows = await request("/api/access-log");
   return rows.map(mapLogEntry);
+}
+
+// ---------- Digital KYC form ----------
+
+export function fetchClientKyc(clientId) {
+  return request(`/api/clients/${clientId}/kyc`);
+}
+
+// Full details including unmasked ID numbers and the signature — each call is logged on the server.
+export function fetchKycRecord(id) {
+  return request(`/api/kyc/${id}`);
+}
+
+export function createKycRecord(clientId, payload) {
+  return request(`/api/clients/${clientId}/kyc`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function linkKycFiles(id, documentId, fileId) {
+  return request(`/api/kyc/${id}/link`, { method: "PATCH", body: JSON.stringify({ documentId, fileId }) });
+}
+
+export function verifyKycRecord(id, note) {
+  return request(`/api/kyc/${id}/verify`, { method: "POST", body: JSON.stringify({ note }) });
+}
+
+// ---------- Filing Helper (GST / AGM preparation) ----------
+
+function jsonBody(body) {
+  return { body: JSON.stringify(body) };
+}
+
+export function fetchFilingTemplates() {
+  return request("/api/filing-templates");
+}
+
+export function createFilingTemplate(template) {
+  return request("/api/filing-templates", { method: "POST", ...jsonBody(template) });
+}
+
+export function updateFilingTemplate(id, template) {
+  return request(`/api/filing-templates/${id}`, { method: "PATCH", ...jsonBody(template) });
+}
+
+export function deleteFilingTemplate(id) {
+  return request(`/api/filing-templates/${id}`, { method: "DELETE" });
+}
+
+export function fetchClientFilings(clientId) {
+  return request(`/api/clients/${clientId}/filings`);
+}
+
+// Starts the filing for a period — or reopens it if that period already has one.
+export function startFiling(clientId, { filingType, periodLabel, periodStart, periodEnd, dueDate }) {
+  return request(`/api/clients/${clientId}/filings`, {
+    method: "POST",
+    ...jsonBody({ filingType, periodLabel, periodStart, periodEnd, dueDate }),
+  });
+}
+
+export function fetchFiling(filingId) {
+  return request(`/api/filings/${filingId}`);
+}
+
+export function fetchFilingLog(filingId) {
+  return request(`/api/filings/${filingId}/log`);
+}
+
+export function updateFilingItem(itemId, state, naReason) {
+  return request(`/api/filing-items/${itemId}`, { method: "PATCH", ...jsonBody({ state, naReason }) });
+}
+
+export function linkFilingDocument(itemId, documentId) {
+  return request(`/api/filing-items/${itemId}/documents`, { method: "POST", ...jsonBody({ documentId }) });
+}
+
+export function unlinkFilingDocument(itemId, documentId) {
+  return request(`/api/filing-items/${itemId}/documents/${documentId}`, { method: "DELETE" });
+}
+
+export function markFilingFiled(filingId, { filedDate, referenceNo, notes }) {
+  return request(`/api/filings/${filingId}/mark-filed`, { method: "POST", ...jsonBody({ filedDate, referenceNo, notes }) });
+}
+
+export function reopenFiling(filingId) {
+  return request(`/api/filings/${filingId}/reopen`, { method: "POST" });
+}
+
+// Fetches the ZIP with the login header (a plain link can't send it) and hands
+// it to the browser/Electron download flow. Returns the file name it was saved under.
+export async function downloadFilingBundle(filingId, { includePersonal = false } = {}) {
+  const token = getToken();
+  let res;
+  try {
+    res = await fetch(`${API_URL}/api/filings/${filingId}/bundle?includePersonal=${includePersonal}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    throw new ApiError("Can't reach the server — is it running on " + API_URL + "?", 0);
+  }
+  if (!res.ok) {
+    let message = `Download failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data && data.error) message = data.error;
+    } catch {
+      // no body
+    }
+    throw new ApiError(message, res.status);
+  }
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+  const fileName = match ? decodeURIComponent(match[1]) : "filing-documents.zip";
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return fileName;
 }
 
 export { ApiError };

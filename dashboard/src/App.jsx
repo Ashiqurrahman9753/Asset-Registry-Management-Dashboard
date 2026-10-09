@@ -3,6 +3,9 @@ import * as XLSX from "xlsx";
 import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip, KeyRound } from "lucide-react";
 import Login, { FirstRunSetup } from "./Login.jsx";
 import UpdateManager from "./UpdateManager.jsx";
+import FilingHelper from "./Filing.jsx";
+import ClientFiles from "./Vault.jsx";
+import KycPanel from "./Kyc.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   getStoredUser,
@@ -343,6 +346,9 @@ function Dashboard({ user, onLogout }) {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [clientDetail, setClientDetail] = useState(null);
   const [clientDetailMode, setClientDetailMode] = useState("view"); // view | edit
+  const [showFiling, setShowFiling] = useState(false); // GST / AGM filing helper for the open client
+  const [showVault, setShowVault] = useState(false); // uploaded-documents vault for the open client
+  const [showKyc, setShowKyc] = useState(false); // digital KYC forms for the open client
   const [editClientForm, setEditClientForm] = useState(null);
   const [editClientBusy, setEditClientBusy] = useState(false);
   const [editClientError, setEditClientError] = useState("");
@@ -679,6 +685,9 @@ function Dashboard({ user, onLogout }) {
 
   function closeClientDetail() {
     setClientDetail(null);
+    setShowFiling(false);
+    setShowVault(false);
+    setShowKyc(false);
     setClientDetailMode("view");
     setEditClientForm(null);
     setEditClientError("");
@@ -696,6 +705,7 @@ function Dashboard({ user, onLogout }) {
       contactPhone: clientDetail.contactPhone,
       contactEmail: clientDetail.contactEmail,
       fax: clientDetail.fax,
+      gstRegNo: clientDetail.gstRegNo,
       status: clientDetail.status,
     });
     setEditClientError("");
@@ -739,6 +749,7 @@ function Dashboard({ user, onLogout }) {
         contactPhone: editClientForm.contactPhone.trim(),
         contactEmail: (editClientForm.contactEmail || "").trim(),
         fax: (editClientForm.fax || "").trim(),
+        gstRegNo: (editClientForm.gstRegNo || "").trim(),
         status: editClientForm.status,
       });
       await refreshAll();
@@ -1970,6 +1981,35 @@ function Dashboard({ user, onLogout }) {
         </div>
       )}
 
+      {/* Digital KYC forms — customer fills in on screen, staff verify, PDF filed */}
+      {showKyc && clientDetail && (
+        <KycPanel client={clientDetail} user={user} onClose={() => setShowKyc(false)} onChanged={refreshAll} />
+      )}
+
+      {/* Uploaded documents — pile of files with previews and an in-app viewer */}
+      {showVault && clientDetail && (
+        <ClientFiles
+          client={clientDetail}
+          documents={entries.filter((e) => e.clientId === clientDetail.id)}
+          onClose={() => setShowVault(false)}
+        />
+      )}
+
+      {/* GST / AGM filing helper — checklist, company details to copy, ZIP of files */}
+      {showFiling && clientDetail && (
+        <FilingHelper
+          client={clientDetail}
+          user={user}
+          documents={entries.filter((e) => e.clientId === clientDetail.id)}
+          ar={computeArDeadline(clientDetail.yearEnd, clientDetail.lastAgmDate)}
+          revealed={clientDetailRevealed}
+          onRequestReveal={() => setRevealTarget("client")}
+          onClose={() => setShowFiling(false)}
+          onChanged={refreshAll}
+          renderAttachments={(documentId) => <DocumentAttachments documentId={documentId} />}
+        />
+      )}
+
       {/* Permission check before showing ROC / contact details, on a scan result or in the client detail view */}
       {revealTarget && (
         <div
@@ -2196,6 +2236,24 @@ function Dashboard({ user, onLogout }) {
                     <FileText size={14} /> Log a document
                   </button>
                   <button
+                    onClick={() => setShowFiling(true)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", color: BRAND_GREEN_DEEP, border: `1px solid ${BRAND_GREEN_DEEP}`, padding: "8px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}
+                  >
+                    <CheckCircle2 size={14} /> Prepare filing
+                  </button>
+                  <button
+                    onClick={() => setShowVault(true)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", color: "#1C2430", border: "1px solid #C9C4B6", padding: "8px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}
+                  >
+                    <Paperclip size={14} /> View uploaded documents
+                  </button>
+                  <button
+                    onClick={() => setShowKyc(true)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", color: "#1C2430", border: "1px solid #C9C4B6", padding: "8px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}
+                  >
+                    <Pencil size={14} /> KYC forms
+                  </button>
+                  <button
                     onClick={() => {
                       setClientLabelPreview(clientDetail);
                       closeClientDetail();
@@ -2245,6 +2303,11 @@ function Dashboard({ user, onLogout }) {
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 10, color: "#8A8577", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>Fax</div>
                   <div style={{ fontSize: 13, color: "#1C2430" }}>{clientDetail.fax || "Not on record"}</div>
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: "#8A8577", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>GST registration no.</div>
+                  <div style={{ fontSize: 13, color: "#1C2430", fontFamily: "monospace" }}>{clientDetail.gstRegNo || "Not on record"}</div>
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
@@ -2352,6 +2415,9 @@ function Dashboard({ user, onLogout }) {
                 </Field>
                 <Field label="Fax number (optional)">
                   <input value={editClientForm.fax || ""} onChange={(e) => setEditClientForm({ ...editClientForm, fax: e.target.value })} style={inputStyle} placeholder="e.g. +65 6123 4567" />
+                </Field>
+                <Field label="GST registration number (optional)" hint="Shown in the Filing Helper so it can be copied into the IRAS return. Leave blank if the company isn't GST-registered.">
+                  <input value={editClientForm.gstRegNo || ""} onChange={(e) => setEditClientForm({ ...editClientForm, gstRegNo: e.target.value })} style={inputStyle} placeholder="e.g. M2-1234567-8" />
                 </Field>
                 <Field label="Directors" required>
                   <DirectorsInput value={editClientForm.directors} onChange={(val) => setEditClientForm({ ...editClientForm, directors: val })} />
