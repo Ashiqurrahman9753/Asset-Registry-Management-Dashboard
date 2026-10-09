@@ -33,6 +33,13 @@ try {
   console.error("KYC form failed to load (the rest of the app is unaffected):", err);
 }
 
+let onboarding = null;
+try {
+  onboarding = require("./onboard.js");
+} catch (err) {
+  console.error("Onboarding forms failed to load (the rest of the app is unaffected):", err);
+}
+
 let vault = null;
 try {
   vault = require("./vault.js");
@@ -114,6 +121,7 @@ async function initSchema() {
   if (filings) await filings.initFilingSchema({ dbRun, dbGet });
   if (vault) await vault.initVaultSchema({ dbRun });
   if (kyc) await kyc.initKycSchema({ dbRun });
+  if (onboarding) await onboarding.initOnboardingSchema({ dbRun });
 }
 
 // Small helpers so route handlers read close to the original synchronous
@@ -526,7 +534,10 @@ app.post("/api/clients/:id/schedules", async (req, res, next) => {
   try {
     const client = await dbGet("SELECT id FROM clients WHERE id = $1", [req.params.id]);
     if (!client) return res.status(404).json({ error: "Client not found" });
-    const { taskName, frequency, dueDay, dueMonth } = req.body;
+    const { taskName, frequency, dueDay, dueMonth, lastCompletedDate } = req.body;
+    if (lastCompletedDate && !/^\d{4}-\d{2}-\d{2}$/.test(String(lastCompletedDate))) {
+      return res.status(400).json({ error: "lastCompletedDate must be YYYY-MM-DD" });
+    }
     if (!taskName || !frequency || !dueDay) {
       return res.status(400).json({ error: "taskName, frequency, and dueDay are required" });
     }
@@ -537,9 +548,9 @@ app.post("/api/clients/:id/schedules", async (req, res, next) => {
       return res.status(400).json({ error: "dueMonth is required for quarterly/yearly schedules" });
     }
     const created = await dbGet(
-      `INSERT INTO client_schedules (client_id, task_name, frequency, due_day, due_month)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [client.id, taskName, frequency, Number(dueDay), dueMonth ? Number(dueMonth) : null]
+      `INSERT INTO client_schedules (client_id, task_name, frequency, due_day, due_month, last_completed_date)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [client.id, taskName, frequency, Number(dueDay), dueMonth ? Number(dueMonth) : null, lastCompletedDate || null]
     );
     res.status(201).json(created);
   } catch (err) {
@@ -887,6 +898,14 @@ if (kyc) {
   }
 }
 
+if (onboarding) {
+  try {
+    onboarding.registerOnboardingRoutes(app, { dbGet, dbAll, dbRun });
+  } catch (err) {
+    console.error("Onboarding routes could not be registered (the rest of the app is unaffected):", err);
+  }
+}
+
 // ---------- Access log ----------
 
 app.get("/api/access-log", async (req, res, next) => {
@@ -933,3 +952,4 @@ initSchema()
     console.error("Failed to initialize database schema:", err);
     process.exit(1);
   });
+

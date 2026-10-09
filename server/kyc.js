@@ -57,6 +57,22 @@ async function initKycSchema({ dbRun }) {
     await dbRun(KYC_SCHEMA);
   } catch (err) {
     console.error("KYC form setup failed (the rest of the app is unaffected):", err);
+    return;
+  }
+  // Added after the first release of this form: signing by hand on a printed copy,
+  // and keeping the scanned signed copy. Each is added on its own so one failure
+  // can't block the others.
+  for (const sql of [
+    "ALTER TABLE kyc_records ADD COLUMN IF NOT EXISTS signature_method TEXT NOT NULL DEFAULT 'screen'",
+    "ALTER TABLE kyc_records ADD COLUMN IF NOT EXISTS signed_file_id INTEGER",
+    "ALTER TABLE kyc_records ADD COLUMN IF NOT EXISTS signed_at TEXT",
+    "ALTER TABLE kyc_records ADD COLUMN IF NOT EXISTS signed_by TEXT",
+  ]) {
+    try {
+      await dbRun(sql);
+    } catch (err) {
+      console.error("KYC form upgrade step failed:", err.message);
+    }
   }
 }
 
@@ -105,6 +121,8 @@ function validateKycBody(body) {
     addressOverseas: cleanMultiline(b.addressOverseas),
     addressOther: cleanMultiline(b.addressOther),
     completedByName: clean(b.completedByName),
+    // "screen": signed on the device. "paper": printed, signed by hand, and the scan uploaded later.
+    signatureMethod: b.signatureMethod === "paper" ? "paper" : "screen",
     signature: String(b.signature || ""),
     consentText: cleanMultiline(b.consentText, 1500),
     consent: b.consent === true,
@@ -124,8 +142,12 @@ function validateKycBody(body) {
   if (!v.phone) return { error: "Please enter a phone number." };
   if (v.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) return { error: "The email address doesn't look right." };
   if (!v.completedByName) return { error: "Please enter the name of the person completing this form." };
-  if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v.signature) || v.signature.length < 400) return { error: "Please sign in the signature box." };
-  if (v.signature.length > 400000) return { error: "The signature image is too large — please sign again." };
+  if (v.signatureMethod === "paper") {
+    v.signature = ""; // signed by hand on the printed copy instead
+  } else {
+    if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v.signature) || v.signature.length < 400) return { error: "Please sign in the signature box." };
+    if (v.signature.length > 400000) return { error: "The signature image is too large — please sign again." };
+  }
   if (!v.consent || !v.consentText) return { error: "Please tick the confirmation box." };
 
   let residence = [];
@@ -155,6 +177,12 @@ function toListItem(row) {
     travel_doc_no_masked: maskId(row.travel_doc_no),
     document_id: row.document_id,
     file_id: row.file_id,
+    signature_method: row.signature_method || "screen",
+    signed_file_id: row.signed_file_id || null,
+    signed_at: row.signed_at || null,
+    signed_by: row.signed_by || null,
+    // screen-signed forms are signed on submission; paper ones are waiting until the scan is uploaded
+    sign_status: (row.signature_method || "screen") === "paper" ? (row.signed_file_id ? "signed" : "awaiting_signature") : "signed",
     handed_by: row.handed_by,
     verified_by: row.verified_by,
     verified_at: row.verified_at,
@@ -201,15 +229,15 @@ function registerKycRoutes(app, { dbGet, dbAll, dbRun }) {
            travel_doc_type, travel_doc_no, travel_doc_issue_date, travel_doc_country,
            id_card_no, id_card_issue_date, id_card_country,
            address_sg, phone, email, address_overseas, address_other, residence,
-           completed_by_name, signature, consent_text, consented_at, handed_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),$25)
+           completed_by_name, signature, consent_text, consented_at, handed_by, signature_method)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),$25,$26)
          RETURNING *`,
         [
           client.id, v.role, v.fullName, v.chineseName || null, v.birthplace, v.dateOfBirth, v.nationalityCurrent, v.nationalityBirth,
           v.travelDocType, v.travelDocNo || null, v.travelDocIssueDate || null, v.travelDocCountry || null,
           v.idCardNo || null, v.idCardIssueDate || null, v.idCardCountry || null,
           v.addressSg || null, v.phone, v.email || null, v.addressOverseas || null, v.addressOther || null, JSON.stringify(v.residence),
-          v.completedByName, v.signature, v.consentText, req.user.username,
+          v.completedByName, v.signature, v.consentText, req.user.username, v.signatureMethod,
         ]
       );
       res.status(201).json(created);
@@ -243,6 +271,30 @@ function registerKycRoutes(app, { dbGet, dbAll, dbRun }) {
     }
   });
 
+  // The printed form, signed by hand and scanned or photographed, has been
+  // uploaded against this record's register entry — remember which file it is.
+  app.post("/api/kyc/:id/signed", async (req, res, next) => {
+    try {
+      const row = await dbGet("SELECT * FROM kyc_records WHERE id = $1", [req.params.id]);
+      if (!row) return res.status(404).json({ error: "KYC record not found" });
+      if (!row.document_id) return res.status(400).json({ error: "File the PDF copy first, then upload the signed copy against it." });
+      const file = await dbGet("SELECT id FROM document_files WHERE id = $1 AND document_id = $2", [req.body.fileId, row.document_id]);
+      if (!file) return res.status(404).json({ error: "That file isn't attached to this form's register entry" });
+      const updated = await dbGet(
+        "UPDATE kyc_records SET signed_file_id = $1, signed_at = to_char(now(), 'YYYY-MM-DD HH24:MI:SS'), signed_by = $2 WHERE id = $3 RETURNING *",
+        [file.id, req.user.username, row.id]
+      );
+      try {
+        await dbRun("INSERT INTO kyc_access_log (kyc_id, staff, action) VALUES ($1, $2, 'signed copy uploaded')", [row.id, req.user.username]);
+      } catch (err) {
+        console.error("Could not record signed-copy upload:", err.message);
+      }
+      res.json(toListItem(updated));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // Once the PDF copy has been filed in the register, remember where it is.
   app.patch("/api/kyc/:id/link", async (req, res, next) => {
     try {
@@ -258,4 +310,4 @@ function registerKycRoutes(app, { dbGet, dbAll, dbRun }) {
   });
 }
 
-module.exports = { initKycSchema, registerKycRoutes, validateKycBody, maskId, ROLES, TRAVEL_DOC_TYPES };
+module.exports = { initKycSchema, registerKycRoutes, validateKycBody, maskId, clean, cleanMultiline, isIsoDate, ROLES, TRAVEL_DOC_TYPES };
