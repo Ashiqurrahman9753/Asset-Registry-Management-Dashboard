@@ -5,7 +5,7 @@
 // itself is untouched — PGlite speaks the real Postgres wire protocol
 // via pglite-socket, so DATABASE_URL just points at localhost instead
 // of the cloud.
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
@@ -297,6 +297,19 @@ function createWindow() {
     minHeight: 650,
     title: "Jardeen Management — Financial Asset Register",
     webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, "preload.js") },
+  });
+  // Links to outside websites (the IRAS / ACRA portal shortcuts) open in the
+  // computer's normal browser, not inside the app. Everything else — notably the
+  // blob: windows used to view an uploaded file — keeps working as before.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) {
+      shell.openExternal(url).catch((err) => log("could not open external link:", err.message));
+      return { action: "deny" };
+    }
+    if (/^http:\/\//i.test(url) && !url.startsWith(`http://localhost:${SERVER_PORT}`)) {
+      return { action: "deny" };
+    }
+    return { action: "allow" };
   });
   mainWindow.loadURL(`http://localhost:${SERVER_PORT}`);
   mainWindow.on("closed", () => { mainWindow = null; });
