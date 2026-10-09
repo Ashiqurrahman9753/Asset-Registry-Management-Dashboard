@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Lock, ShieldCheck } from "lucide-react";
 import { login, saveSession, createFirstAccount } from "./api.js";
 import { Wallpaper, glassPanel, BRAND_GREEN, BRAND_GREEN_DEEP } from "./theme.jsx";
+import { LiveClock } from "./Clock.jsx";
 
 export default function Login({ onLoggedIn }) {
   const [username, setUsername] = useState("");
@@ -31,12 +32,15 @@ export default function Login({ onLoggedIn }) {
         fontFamily: "'Inter', system-ui, sans-serif",
         minHeight: "100vh",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         position: "relative",
+        padding: "24px 0",
       }}
     >
       <Wallpaper />
+      <LiveClock variant="hero" />
       <form
         onSubmit={submit}
         style={{
@@ -155,12 +159,15 @@ export function FirstRunSetup({ onLoggedIn }) {
         fontFamily: "'Inter', system-ui, sans-serif",
         minHeight: "100vh",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         position: "relative",
+        padding: "24px 0",
       }}
     >
       <Wallpaper />
+      <LiveClock variant="hero" />
       <form
         onSubmit={submit}
         style={{

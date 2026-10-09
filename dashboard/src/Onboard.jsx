@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { X, Download, Search } from "lucide-react";
 import { Spinner } from "./Loading.jsx";
+import { Pager, usePaging } from "./Pager.jsx";
 import { BRAND_GREEN_DEEP, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   fetchOnboardingSummary,
@@ -638,6 +639,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
       return true;
     });
   }, [base, filter, query]);
+  const paging = usePaging(visible, 20, `${query}|${filter}|${activeOnly}`);
 
   const openClient = clients.find((c) => c.id === openId);
 
@@ -712,7 +714,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
                   </td>
                 </tr>
               )}
-              {visible.map((r) => {
+              {paging.pageItems.map((r) => {
                 const st = STAGE[r.stage];
                 const waiting = [];
                 if (r.awaiting_signature > 0) waiting.push(`${r.awaiting_signature} signed cop${r.awaiting_signature === 1 ? "y" : "ies"}`);
@@ -742,6 +744,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
           </table>
         </div>
       )}
+      {rows && <Pager page={paging.page} pageCount={paging.pageCount} onPage={paging.setPage} total={visible.length} pageSize={20} />}
 
       {openClient && (
         <ClientOnboarding

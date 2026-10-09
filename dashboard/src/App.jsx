@@ -8,6 +8,8 @@ import ClientFiles from "./Vault.jsx";
 import { computeNextDue } from "./deadlines.js";
 import { ComplianceTiles, countUrgent } from "./Comply.jsx";
 import { Spinner, LoadingPanel, TopBar } from "./Loading.jsx";
+import { Pager, usePaging } from "./Pager.jsx";
+import { LiveClock } from "./Clock.jsx";
 import { OnboardingHub, ClientOnboarding } from "./Onboard.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
@@ -746,6 +748,7 @@ function Dashboard({ user, onLogout }) {
       return matchesQuery && matchesCat;
     });
   }, [entries, query, catFilter]);
+  const regPaging = usePaging(filtered, 25, `${query}|${catFilter}`);
 
   const stats = useMemo(() => {
     const total = entries.length;
@@ -946,6 +949,7 @@ function Dashboard({ user, onLogout }) {
         </nav>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          <LiveClock />
           <button
             onClick={openEntryForm}
             style={{ display: "flex", alignItems: "center", gap: 6, background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "9px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}
@@ -1241,7 +1245,7 @@ function Dashboard({ user, onLogout }) {
                       <td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#8A8577" }}>No matching records.</td>
                     </tr>
                   )}
-                  {filtered.map((e) => {
+                  {regPaging.pageItems.map((e) => {
                     const s = CAT_STYLE[e.category];
                     const cat = CATEGORIES.find((c) => c.key === e.category);
                     return (
@@ -1282,6 +1286,7 @@ function Dashboard({ user, onLogout }) {
                 </tbody>
               </table>
             </div>
+            <Pager page={regPaging.page} pageCount={regPaging.pageCount} onPage={regPaging.setPage} total={filtered.length} pageSize={25} />
           </>
         )}
 

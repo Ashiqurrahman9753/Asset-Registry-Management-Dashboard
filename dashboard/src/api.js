@@ -2,13 +2,23 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 const TOKEN_KEY = "fams_token";
 const USER_KEY = "fams_user";
 
+// The sign-in lasts only while the app window is open: closing the app and opening it
+// again asks for the password. (Refreshing the window keeps you signed in.)
+try {
+  // Sign-ins saved by earlier versions are removed, so nobody stays signed in from before.
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+} catch {
+  /* storage unavailable — nothing to clear */
+}
+
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 export function getStoredUser() {
   try {
-    const raw = localStorage.getItem(USER_KEY);
+    const raw = sessionStorage.getItem(USER_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -16,15 +26,14 @@ export function getStoredUser() {
 }
 
 export function saveSession(token, user) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  sessionStorage.setItem(TOKEN_KEY, token);
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
 }
-
 class ApiError extends Error {
   constructor(message, status) {
     super(message);
