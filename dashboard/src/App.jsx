@@ -5,7 +5,10 @@ import Login, { FirstRunSetup } from "./Login.jsx";
 import UpdateManager from "./UpdateManager.jsx";
 import FilingHelper from "./Filing.jsx";
 import ClientFiles from "./Vault.jsx";
-import KycPanel from "./Kyc.jsx";
+import { computeNextDue } from "./deadlines.js";
+import { ComplianceTiles, countUrgent } from "./Comply.jsx";
+import { Spinner, LoadingPanel, TopBar } from "./Loading.jsx";
+import { OnboardingHub, ClientOnboarding } from "./Onboard.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   getStoredUser,
@@ -153,50 +156,6 @@ const SCHEDULE_TASK_PRESETS = ["CPF Filing", "GST Filing", "Compilation", "Accou
 // in, not by literal day-of-month comparison — filing a few days *before*
 // the due date should still satisfy that cycle, not silently get attributed
 // to the next one (comparing raw dates got this wrong for early filers).
-function computeNextDue(schedule, today = new Date()) {
-  const { frequency, dueDay, dueMonth, lastCompletedDate } = schedule;
-  const lastDayOfMonth = (y, m) => new Date(y, m + 1, 0).getDate();
-  const makeDate = (y, m) => new Date(y, m, Math.min(dueDay, lastDayOfMonth(y, m)));
-  const periodIndex = (date) => {
-    const totalMonths = date.getFullYear() * 12 + date.getMonth();
-    if (frequency === "monthly") return totalMonths;
-    const anchor = ((dueMonth || 1) - 1 + 12) % 12;
-    const cycleLen = frequency === "quarterly" ? 3 : 12;
-    return Math.floor((totalMonths - anchor - 1) / cycleLen);
-  };
-
-  const candidates = [];
-  if (frequency === "monthly") {
-    for (let offset = -13; offset <= 13; offset++) {
-      const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
-      candidates.push(makeDate(d.getFullYear(), d.getMonth()));
-    }
-  } else {
-    const anchor = ((dueMonth || 1) - 1 + 12) % 12;
-    const monthsInYear = frequency === "quarterly" ? [anchor, anchor + 3, anchor + 6, anchor + 9] : [anchor];
-    for (let yOff = -2; yOff <= 2; yOff++) {
-      for (const m of monthsInYear) {
-        const d = new Date(today.getFullYear() + yOff, m, 1);
-        candidates.push(makeDate(d.getFullYear(), d.getMonth()));
-      }
-    }
-  }
-  candidates.sort((a, b) => a - b);
-
-  const lastDone = lastCompletedDate ? new Date(lastCompletedDate) : null;
-  const lastDonePeriod = lastDone ? periodIndex(lastDone) : null;
-  let due;
-  if (lastDonePeriod !== null) {
-    due = candidates.find((d) => periodIndex(d) > lastDonePeriod);
-  } else {
-    const pastOrToday = candidates.filter((d) => d <= today);
-    due = pastOrToday.length ? pastOrToday[pastOrToday.length - 1] : candidates.find((d) => d > today);
-  }
-  if (!due) return null;
-
-  const daysLeft = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
-  return { due, daysLeft, overdue: daysLeft < 0 };
-}
 
 // A green "Verified" tick means the core statutory fields a corporate
 // secretary actually needs are on file — not a claim about ACRA's own
@@ -348,7 +307,7 @@ function Dashboard({ user, onLogout }) {
   const [clientDetailMode, setClientDetailMode] = useState("view"); // view | edit
   const [showFiling, setShowFiling] = useState(false); // GST / AGM filing helper for the open client
   const [showVault, setShowVault] = useState(false); // uploaded-documents vault for the open client
-  const [showKyc, setShowKyc] = useState(false); // digital KYC forms for the open client
+  const [showKyc, setShowKyc] = useState(false); // onboarding forms (KYC, PEP) for the open client
   const [editClientForm, setEditClientForm] = useState(null);
   const [editClientBusy, setEditClientBusy] = useState(false);
   const [editClientError, setEditClientError] = useState("");
@@ -544,7 +503,9 @@ function Dashboard({ user, onLogout }) {
     [onLogout]
   );
 
+  const [refreshing, setRefreshing] = useState(false);
   const refreshAll = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [c, d, l, s] = await Promise.all([fetchClients(), fetchDocuments(), fetchAccessLog(), fetchAllSchedules()]);
       setClients(c);
@@ -554,6 +515,8 @@ function Dashboard({ user, onLogout }) {
       setErrorMsg("");
     } catch (err) {
       if (!handleAuthError(err)) setErrorMsg(err.message || "Failed to load data");
+    } finally {
+      setRefreshing(false);
     }
   }, [handleAuthError]);
 
@@ -911,13 +874,20 @@ function Dashboard({ user, onLogout }) {
     return (
       <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B6656", position: "relative" }}>
         <Wallpaper />
-        <span style={{ position: "relative", zIndex: 1 }}>Loading…</span>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+          <Spinner size={42} color={BRAND_GREEN_DEEP} thickness={3.4} />
+          <span style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: 0.3 }}>Loading your register…</span>
+        </div>
       </div>
     );
   }
 
+  // Filings (CPF, GST) that are overdue or due within 5 days — shown as a live badge on the Dashboard tab.
+  const urgentFilings = countUrgent(clients, schedules);
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", color: "#1C2430", position: "relative" }}>
+      <TopBar active={refreshing} />
       <Wallpaper />
       {/* Header — clean light nav bar: wordmark left, flat nav links center, actions right */}
       <div style={{ ...glassPanel(0.6, 20), position: "sticky", top: 0, zIndex: 10, color: "#1C2430", padding: "14px 28px", display: "flex", alignItems: "center", gap: 28, borderTop: "none", borderLeft: "none", borderRight: "none", boxShadow: "0 2px 16px rgba(28,36,48,0.08)" }}>
@@ -938,6 +908,7 @@ function Dashboard({ user, onLogout }) {
           {[
             { key: "dashboard", label: "Dashboard" },
             { key: "clients", label: "Clients" },
+            { key: "onboarding", label: "Onboarding" },
             { key: "register", label: "Register" },
             { key: "report", label: "Report" },
             { key: "scan", label: "Scan lookup" },
@@ -965,6 +936,11 @@ function Dashboard({ user, onLogout }) {
               {t.key === "dashboard" && <LayoutGrid size={13} />}
               {t.key === "scan" && <ScanLine size={13} />}
               {t.label}
+              {t.key === "dashboard" && urgentFilings > 0 && (
+                <span title={`${urgentFilings} CPF / GST filings overdue or due within 5 days`} style={{ background: "#A63D40", color: "#fff", fontSize: 10, fontWeight: 800, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", animation: "fams-pulse 1.8s infinite" }}>
+                  {urgentFilings}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -988,7 +964,7 @@ function Dashboard({ user, onLogout }) {
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 28px", position: "relative", zIndex: 1 }}>
         {tab === "dashboard" && (
-          <DashboardOverview clients={clients} entries={entries} log={log} schedules={schedules} docCountFor={docCountFor} onOpenClient={openClientDetail} />
+          <DashboardOverview clients={clients} entries={entries} log={log} schedules={schedules} docCountFor={docCountFor} onOpenClient={openClientDetail} onRefresh={refreshAll} />
         )}
 
         {tab === "clients" && (
@@ -1217,6 +1193,8 @@ function Dashboard({ user, onLogout }) {
             </div>
           </>
         )}
+
+        {tab === "onboarding" && <OnboardingHub clients={clients} user={user} onChanged={refreshAll} />}
 
         {tab === "register" && (
           <>
@@ -1981,9 +1959,9 @@ function Dashboard({ user, onLogout }) {
         </div>
       )}
 
-      {/* Digital KYC forms — customer fills in on screen, staff verify, PDF filed */}
+      {/* Onboarding forms (KYC, PEP) — customer fills in on screen, signs on screen or by hand, staff verify, PDF filed */}
       {showKyc && clientDetail && (
-        <KycPanel client={clientDetail} user={user} onClose={() => setShowKyc(false)} onChanged={refreshAll} />
+        <ClientOnboarding client={clientDetail} user={user} onClose={() => setShowKyc(false)} onChanged={refreshAll} />
       )}
 
       {/* Uploaded documents — pile of files with previews and an in-app viewer */}
@@ -2251,7 +2229,7 @@ function Dashboard({ user, onLogout }) {
                     onClick={() => setShowKyc(true)}
                     style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", color: "#1C2430", border: "1px solid #C9C4B6", padding: "8px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}
                   >
-                    <Pencil size={14} /> KYC forms
+                    <Pencil size={14} /> Onboarding
                   </button>
                   <button
                     onClick={() => {
@@ -3139,7 +3117,7 @@ function DonutLegend({ data }) {
   );
 }
 
-function DashboardOverview({ clients, entries, log, schedules, docCountFor, onOpenClient }) {
+function DashboardOverview({ clients, entries, log, schedules, docCountFor, onOpenClient, onRefresh }) {
   const [showDeadlines, setShowDeadlines] = useState(false);
   const totalClients = clients.length;
   const activeClients = clients.filter((c) => c.status === "A").length;
@@ -3199,6 +3177,9 @@ function DashboardOverview({ clients, entries, log, schedules, docCountFor, onOp
 
   return (
     <div>
+      {/* CPF and GST for every active company: live status, action-needed tag, and one-click tick-off */}
+      <ComplianceTiles clients={clients} schedules={schedules} onChanged={onRefresh} onOpenClient={onOpenClient} />
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
         <StatCard label="Total clients" value={totalClients} icon={<Building2 size={16} />} accent={BRAND_GREEN_DEEP} />
         <StatCard label="Active clients" value={activeClients} icon={<Activity size={16} />} accent="#2F6F62" />
@@ -4046,7 +4027,7 @@ function ScheduleManager({ clientId }) {
       {error && <div style={{ color: "#7A2C2E", fontSize: 11, marginBottom: 8 }}>{error}</div>}
 
       {schedules === null ? (
-        <div style={{ fontSize: 12, color: "#8A8577" }}>Loading…</div>
+        <LoadingPanel label="Loading filings…" minHeight={70} />
       ) : schedules.length === 0 ? (
         <div style={{ fontSize: 13, color: "#8A8577" }}>No recurring filings tracked for this client.</div>
       ) : (
@@ -4148,7 +4129,11 @@ function DocumentAttachments({ documentId }) {
       </button>
       {open && (
         <div style={{ marginTop: 6, background: "#fff", border: "1px solid #E5E1D5", padding: 8 }}>
-          {files === null && <div style={{ fontSize: 11, color: "#8A8577" }}>Loading…</div>}
+          {files === null && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#8A8577" }}>
+              <Spinner size={13} /> Loading…
+            </div>
+          )}
           {files && files.length === 0 && <div style={{ fontSize: 11, color: "#8A8577" }}>No files attached yet.</div>}
           {files &&
             files.map((f) => (

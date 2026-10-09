@@ -223,10 +223,10 @@ export async function fetchClientSchedules(clientId) {
   return rows.map(mapSchedule);
 }
 
-export async function createSchedule(clientId, { taskName, frequency, dueDay, dueMonth }) {
+export async function createSchedule(clientId, { taskName, frequency, dueDay, dueMonth, lastCompletedDate }) {
   const row = await request(`/api/clients/${clientId}/schedules`, {
     method: "POST",
-    body: JSON.stringify({ taskName, frequency, dueDay, dueMonth }),
+    body: JSON.stringify({ taskName, frequency, dueDay, dueMonth, lastCompletedDate }),
   });
   return mapSchedule(row);
 }
@@ -448,6 +448,45 @@ export function linkKycFiles(id, documentId, fileId) {
 
 export function verifyKycRecord(id, note) {
   return request(`/api/kyc/${id}/verify`, { method: "POST", body: JSON.stringify({ note }) });
+}
+
+// Printed copy signed by hand, scanned, and uploaded: tells the server which uploaded file is the signed copy.
+export function markKycSigned(id, fileId) {
+  return request(`/api/kyc/${id}/signed`, { method: "POST", body: JSON.stringify({ fileId }) });
+}
+
+// Forms filled in and signed before the app: the scan or PDF is just stored.
+export function fetchUploadedForms(clientId) {
+  return request(`/api/clients/${clientId}/uploaded-forms`);
+}
+export function createUploadedForm(clientId, payload) {
+  return request(`/api/clients/${clientId}/uploaded-forms`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+// ---------- PEP declaration / enhanced due diligence ----------
+
+export function fetchClientPep(clientId) {
+  return request(`/api/clients/${clientId}/pep`);
+}
+export function fetchPepRecord(id) {
+  return request(`/api/pep/${id}`);
+}
+export function createPepRecord(clientId, payload) {
+  return request(`/api/clients/${clientId}/pep`, { method: "POST", body: JSON.stringify(payload) });
+}
+export function linkPepFiles(id, documentId, fileId) {
+  return request(`/api/pep/${id}/link`, { method: "PATCH", body: JSON.stringify({ documentId, fileId }) });
+}
+export function verifyPepRecord(id, note) {
+  return request(`/api/pep/${id}/verify`, { method: "POST", body: JSON.stringify({ note }) });
+}
+export function markPepSigned(id, fileId) {
+  return request(`/api/pep/${id}/signed`, { method: "POST", body: JSON.stringify({ fileId }) });
+}
+
+// One row per client: how far their onboarding paperwork has got.
+export function fetchOnboardingSummary() {
+  return request("/api/onboarding/summary");
 }
 
 // ---------- Filing Helper (GST / AGM preparation) ----------

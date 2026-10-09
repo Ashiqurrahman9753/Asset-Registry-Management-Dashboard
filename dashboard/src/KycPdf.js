@@ -69,6 +69,7 @@ export function kycRowToData(row, companyName) {
     consentText: row.consent_text,
     completedAt: row.consented_at || row.created_at || "",
     handedBy: row.handed_by || "",
+    signatureMethod: row.signature_method || "screen",
   };
 }
 
@@ -78,15 +79,15 @@ export const PAGE_W = 1240; // A4 at 150 dpi
 export const PAGE_H = 1754;
 const FONT = '"Segoe UI", "Microsoft YaHei", "SimSun", "Noto Sans CJK SC", Arial, sans-serif';
 
-function setFont(ctx, size, bold) {
+export function setFont(ctx, size, bold) {
   ctx.font = `${bold ? "700 " : ""}${size}px ${FONT}`;
 }
-function measure(ctx, str, size, bold) {
+export function measure(ctx, str, size, bold) {
   setFont(ctx, size, bold);
   return ctx.measureText(str).width;
 }
 
-function drawText(ctx, str, x, y, { size = 26, bold = false, color = "#111", align = "left" } = {}) {
+export function drawText(ctx, str, x, y, { size = 26, bold = false, color = "#111", align = "left" } = {}) {
   setFont(ctx, size, bold);
   ctx.fillStyle = color;
   ctx.textAlign = align;
@@ -94,7 +95,7 @@ function drawText(ctx, str, x, y, { size = 26, bold = false, color = "#111", ali
   ctx.fillText(String(str || ""), x, y);
 }
 
-function ellipsize(ctx, str, size, bold, maxW) {
+export function ellipsize(ctx, str, size, bold, maxW) {
   let s = String(str || "");
   if (measure(ctx, s, size, bold) <= maxW) return s;
   while (s.length > 1 && measure(ctx, `${s}…`, size, bold) > maxW) s = s.slice(0, -1);
@@ -103,7 +104,7 @@ function ellipsize(ctx, str, size, bold, maxW) {
 
 // Splits text to fit maxW at the given size: on spaces where possible, and
 // inside a word only when a single word is wider than the line (long emails, IDs).
-function wrapText(ctx, str, size, bold, maxW) {
+export function wrapText(ctx, str, size, bold, maxW) {
   const lines = [];
   for (const para of String(str || "").split("\n")) {
     let line = "";
@@ -140,7 +141,7 @@ function wrapText(ctx, str, size, bold, maxW) {
 }
 
 // Wraps to at most maxLines; marks the block truncated if text had to be cut.
-function wrapBlock(ctx, str, size, bold, maxW, maxLines) {
+export function wrapBlock(ctx, str, size, bold, maxW, maxLines) {
   const all = wrapText(ctx, str, size, bold, maxW);
   if (all.length <= maxLines) return { lines: all, truncated: false };
   const lines = all.slice(0, maxLines);
@@ -150,7 +151,7 @@ function wrapBlock(ctx, str, size, bold, maxW, maxLines) {
 
 // "Label: VALUE". The value sits after the label if it fits (shrinking a little
 // if needed); otherwise it drops below the label and wraps over up to maxLines.
-function plan(ctx, label, value, w, maxLines) {
+export function plan(ctx, label, value, w, maxLines) {
   const val = String(value || "").replace(/\s+/g, " ").trim();
   const labelW = label ? measure(ctx, `${label} `, 24, false) : 0;
   const base = { label, labelW, val, truncated: false };
@@ -165,7 +166,7 @@ function plan(ctx, label, value, w, maxLines) {
   return { ...base, mode: "stack", size: 22, lines: block.lines, h: (label ? 30 : 0) + block.lines.length * 30 + 4, truncated: block.truncated };
 }
 
-function paintPlan(ctx, p, x, yTop) {
+export function paintPlan(ctx, p, x, yTop) {
   if (p.mode === "inline") {
     if (p.label) drawText(ctx, p.label, x, yTop + 26, { size: 24, color: "#444" });
     drawText(ctx, p.lines[0], x + p.labelW, yTop + 26, { size: p.size, bold: true });
@@ -393,6 +394,8 @@ export function drawKycForm(ctx, d, sigImg) {
     const h = sigImg.height * scale;
     ctx.drawImage(sigImg, 930 - w / 2, sigLineY - h - 4, w, h);
   }
+  const byHand = d.signatureMethod === "paper";
+  if (byHand) drawText(ctx, "Please sign here by hand", 930, sigLineY - 50, { size: 21, color: "#999", align: "center" });
   hLine(sigLineY, 700, R);
   drawText(ctx, "Signature", 930, sigLineY + 30, { size: 22, color: "#444", align: "center" });
   const nameSize = [28, 25, 22, 19].find((s) => measure(ctx, d.completedByName, s, true) <= 440) || 19;
@@ -406,7 +409,7 @@ export function drawKycForm(ctx, d, sigImg) {
   drawText(ctx, "Name of Person Completing this Form", 930, sigLineY + 118, { size: 22, color: "#444", align: "center" });
 
   // Footer
-  const footer = `Completed on screen${d.completedAt ? ` on ${d.completedAt}` : ""}${d.handedBy ? ` · handled by ${d.handedBy}` : ""} · signed digitally`;
+  const footer = `Completed on screen${d.completedAt ? ` on ${d.completedAt}` : ""}${d.handedBy ? ` · handled by ${d.handedBy}` : ""} · ${byHand ? "to be signed by hand on the printed copy" : "signed digitally"}`;
   drawText(ctx, ellipsize(ctx, footer, 17, false, R - X), X, PAGE_H - 36, { size: 17, color: "#777" });
   if (lay.overflow.length) {
     drawText(ctx, "Some entries are shown in short form — their full text is on page 2.", X, PAGE_H - 74, { size: 21, bold: true, color: "#A63D40" });
@@ -457,7 +460,7 @@ export function drawKycAnnex(ctx, d, overflow, sigImg) {
 
 // ---------- PDF around JPEG page images ----------
 
-function buildPdf(jpegs, widthPx, heightPx, title) {
+export function buildPdf(jpegs, widthPx, heightPx, title) {
   const enc = (s) => new TextEncoder().encode(s);
   const parts = [];
   const offsets = [];
@@ -511,7 +514,7 @@ function buildPdf(jpegs, widthPx, heightPx, title) {
   return out;
 }
 
-function loadImage(src) {
+export function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
@@ -520,29 +523,42 @@ function loadImage(src) {
   });
 }
 
-async function canvasToJpeg(canvas) {
+export async function canvasToJpeg(canvas) {
   const blob = await new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not create the page image"))), "image/jpeg", 0.88)
   );
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-// data: the form values (see kycRowToData). Returns a PDF Blob (1 page, or 2 if anything needed a continuation sheet).
-export async function renderKycPdf(data) {
-  const page = () => {
-    const c = document.createElement("canvas");
-    c.width = PAGE_W;
-    c.height = PAGE_H;
-    return c;
-  };
-  const sigImg = data.signature ? await loadImage(data.signature) : null;
-  const first = page();
+export function newPageCanvas() {
+  const c = document.createElement("canvas");
+  c.width = PAGE_W;
+  c.height = PAGE_H;
+  return c;
+}
+
+// The form's pages as canvases (1, or 2 if anything needed a continuation sheet) —
+// used both for the PDF and for printing, so the paper copy is identical to the filed one.
+export async function renderKycCanvases(data) {
+  const sigImg = data.signature && data.signatureMethod !== "paper" ? await loadImage(data.signature) : null;
+  const first = newPageCanvas();
   const overflow = drawKycForm(first.getContext("2d"), data, sigImg);
-  const jpegs = [await canvasToJpeg(first)];
+  const pages = [first];
   if (overflow.length > 0) {
-    const second = page();
+    const second = newPageCanvas();
     drawKycAnnex(second.getContext("2d"), data, overflow, sigImg);
-    jpegs.push(await canvasToJpeg(second));
+    pages.push(second);
   }
-  return new Blob([buildPdf(jpegs, PAGE_W, PAGE_H, `KYC - ${data.fullName}`)], { type: "application/pdf" });
+  return pages;
+}
+
+export async function canvasesToPdf(canvases, title) {
+  const jpegs = [];
+  for (const c of canvases) jpegs.push(await canvasToJpeg(c));
+  return new Blob([buildPdf(jpegs, PAGE_W, PAGE_H, title)], { type: "application/pdf" });
+}
+
+// data: the form values (see kycRowToData). Returns a PDF Blob.
+export async function renderKycPdf(data) {
+  return canvasesToPdf(await renderKycCanvases(data), `KYC - ${data.fullName}`);
 }
