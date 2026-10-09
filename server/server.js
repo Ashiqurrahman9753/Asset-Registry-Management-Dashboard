@@ -17,6 +17,29 @@ const { CATEGORY_INFO, sendRawTSPL, buildDocumentLabelTSPL, buildBoxLabelTSPL, b
 const multer = require("multer");
 const storage = require("./storage.js");
 
+// The Filing Helper is loaded defensively — if anything about it is broken, the
+// register itself (clients, documents, scanning, labels) must still start and work.
+let filings = null;
+try {
+  filings = require("./filings.js");
+} catch (err) {
+  console.error("Filing Helper failed to load (the rest of the app is unaffected):", err);
+}
+
+let kyc = null;
+try {
+  kyc = require("./kyc.js");
+} catch (err) {
+  console.error("KYC form failed to load (the rest of the app is unaffected):", err);
+}
+
+let vault = null;
+try {
+  vault = require("./vault.js");
+} catch (err) {
+  console.error("Document vault failed to load (the rest of the app is unaffected):", err);
+}
+
 // Client PDFs/photos of statements — kept modest since these are office
 // documents, not media; large uploads almost certainly mean the wrong file.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -87,6 +110,10 @@ async function initSchema() {
     ALTER TABLE clients ADD COLUMN IF NOT EXISTS pending_work TEXT;
     ALTER TABLE clients ADD COLUMN IF NOT EXISTS annual_revenue NUMERIC;
   `);
+
+  if (filings) await filings.initFilingSchema({ dbRun, dbGet });
+  if (vault) await vault.initVaultSchema({ dbRun });
+  if (kyc) await kyc.initKycSchema({ dbRun });
 }
 
 // Small helpers so route handlers read close to the original synchronous
@@ -360,6 +387,7 @@ const CLIENT_EDITABLE_FIELDS = {
   contactPhone: "contact_phone",
   contactEmail: "contact_email",
   fax: "fax",
+  gstRegNo: "gst_reg_no",
   status: "status",
 };
 
@@ -813,6 +841,7 @@ app.get("/api/files/:fileId/download", async (req, res, next) => {
     const file = await dbGet("SELECT * FROM document_files WHERE id = $1", [req.params.fileId]);
     if (!file) return res.status(404).json({ error: "File not found" });
     const buffer = await storage.readFile(file.storage_key);
+    if (vault) await vault.logFileAccess({ dbRun }, file, req.user.username, req.query.action);
     res.setHeader("Content-Type", file.mime_type || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.filename)}"`);
     res.send(buffer);
@@ -832,6 +861,31 @@ app.delete("/api/files/:fileId", async (req, res, next) => {
     next(err);
   }
 });
+
+// ---------- Filing Helper (GST / AGM preparation) ----------
+if (filings) {
+  try {
+    filings.registerFilingRoutes(app, { dbGet, dbAll, dbRun, pool, requireAdmin, storage });
+  } catch (err) {
+    console.error("Filing Helper routes could not be registered (the rest of the app is unaffected):", err);
+  }
+}
+
+if (vault) {
+  try {
+    vault.registerVaultRoutes(app, { dbGet, dbAll, requireAdmin });
+  } catch (err) {
+    console.error("Document vault routes could not be registered (the rest of the app is unaffected):", err);
+  }
+}
+
+if (kyc) {
+  try {
+    kyc.registerKycRoutes(app, { dbGet, dbAll, dbRun });
+  } catch (err) {
+    console.error("KYC form routes could not be registered (the rest of the app is unaffected):", err);
+  }
+}
 
 // ---------- Access log ----------
 
