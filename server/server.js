@@ -116,6 +116,9 @@ async function initSchema() {
     ALTER TABLE clients ADD COLUMN IF NOT EXISTS tax_notes TEXT;
     ALTER TABLE clients ADD COLUMN IF NOT EXISTS pending_work TEXT;
     ALTER TABLE clients ADD COLUMN IF NOT EXISTS annual_revenue NUMERIC;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
   `);
 
   if (filings) await filings.initFilingSchema({ dbRun, dbGet });
@@ -316,6 +319,34 @@ app.patch("/api/users/me/password", async (req, res, next) => {
     const hash = bcrypt.hashSync(newPassword, 10);
     await dbRun("UPDATE users SET password_hash = $1 WHERE id = $2", [hash, user.id]);
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Self-service profile: any logged-in user can see and edit their own display name, job title and phone.
+function cleanProfileText(v, max) {
+  return String(v == null ? "" : v).replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+app.get("/api/users/me", async (req, res, next) => {
+  try {
+    const u = await dbGet("SELECT id, username, role, full_name, job_title, phone FROM users WHERE id = $1", [req.user.sub]);
+    if (!u) return res.status(404).json({ error: "Account not found" });
+    res.json({ username: u.username, role: u.role, fullName: u.full_name || "", jobTitle: u.job_title || "", phone: u.phone || "" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch("/api/users/me", async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const fullName = cleanProfileText(b.fullName, 80);
+    const jobTitle = cleanProfileText(b.jobTitle, 80);
+    const phone = cleanProfileText(b.phone, 40);
+    await dbRun("UPDATE users SET full_name = $1, job_title = $2, phone = $3 WHERE id = $4", [fullName || null, jobTitle || null, phone || null, req.user.sub]);
+    res.json({ username: req.user.username, role: req.user.role, fullName, jobTitle, phone });
   } catch (err) {
     next(err);
   }
