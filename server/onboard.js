@@ -62,6 +62,19 @@ const PEP_SCHEMA = `
     created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
   );
   CREATE INDEX IF NOT EXISTS idx_uploaded_forms_client ON uploaded_forms(client_id);
+
+  -- The client file checklist: which paperwork is on file for a client, on paper or digitally.
+  CREATE TABLE IF NOT EXISTS client_file_items (
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    item_key TEXT NOT NULL,            -- kyc | pep | id | letter
+    status TEXT NOT NULL,              -- paper | missing | na
+    location TEXT,                     -- where the paper copy is kept, e.g. "Drawer 3"
+    on_file_date TEXT,
+    note TEXT,
+    updated_by TEXT,
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+    PRIMARY KEY (client_id, item_key)
+  );
 `;
 
 // Never lets a problem here stop the app from starting.
@@ -73,6 +86,7 @@ async function initOnboardingSchema({ dbRun }) {
   }
 }
 
+const FILE_ITEM_KEYS = ["kyc", "pep", "id", "letter"];
 const PEP_TYPES = ["sg_pep", "foreign_pep", "intl_org_pep", "family_member", "close_associate"];
 
 function todayLocal() {
@@ -281,6 +295,63 @@ function registerOnboardingRoutes(app, { dbGet, dbAll, dbRun }) {
     }
   });
 
+  // The paperwork checklist for one client.
+  app.get("/api/clients/:id/file-items", async (req, res, next) => {
+    try {
+      res.json(await dbAll("SELECT * FROM client_file_items WHERE client_id = $1", [req.params.id]));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  async function saveFileItem(clientId, key, b, user) {
+    const status = ["paper", "missing", "na"].includes(b.status) ? b.status : null;
+    if (!FILE_ITEM_KEYS.includes(key) || !status) return { error: "Unknown checklist item or status" };
+    const date = b.onFileDate && isIsoDate(b.onFileDate) ? b.onFileDate : status === "paper" ? todayLocal() : null;
+    await dbRun(
+      `INSERT INTO client_file_items (client_id, item_key, status, location, on_file_date, note, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,to_char(now(), 'YYYY-MM-DD HH24:MI:SS'))
+       ON CONFLICT (client_id, item_key) DO UPDATE SET status = EXCLUDED.status, location = EXCLUDED.location,
+         on_file_date = EXCLUDED.on_file_date, note = EXCLUDED.note, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`,
+      [clientId, key, status, clean(b.location, 120) || null, status === "paper" ? date : null, cleanMultiline(b.note, 300) || null, user]
+    );
+    return {};
+  }
+
+  app.put("/api/clients/:id/file-items/:key", async (req, res, next) => {
+    try {
+      const client = await dbGet("SELECT id FROM clients WHERE id = $1", [req.params.id]);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      const out = await saveFileItem(client.id, req.params.key, req.body || {}, req.user.username);
+      if (out.error) return res.status(400).json({ error: out.error });
+      res.json(await dbAll("SELECT * FROM client_file_items WHERE client_id = $1", [client.id]));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Mark the same paperwork as on file for many clients at once (existing clients whose forms are in the drawers).
+  app.post("/api/file-items/bulk", async (req, res, next) => {
+    try {
+      const b = req.body || {};
+      const ids = Array.isArray(b.clientIds) ? b.clientIds.filter((x) => Number.isInteger(x)).slice(0, 500) : [];
+      const keys = Array.isArray(b.itemKeys) ? b.itemKeys.filter((k) => FILE_ITEM_KEYS.includes(k)) : [];
+      if (!ids.length || !keys.length) return res.status(400).json({ error: "Choose at least one client and one item." });
+      let saved = 0;
+      for (const id of ids) {
+        const client = await dbGet("SELECT id FROM clients WHERE id = $1", [id]);
+        if (!client) continue;
+        for (const key of keys) {
+          const out = await saveFileItem(client.id, key, { status: "paper", location: b.location, onFileDate: b.onFileDate, note: b.note }, req.user.username);
+          if (!out.error) saved += 1;
+        }
+      }
+      res.json({ saved });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // One row per client for the Onboarding tab: how many forms, and what's still waiting.
   app.get("/api/onboarding/summary", async (req, res, next) => {
     try {
@@ -310,14 +381,34 @@ function registerOnboardingRoutes(app, { dbGet, dbAll, dbRun }) {
            FROM clients c ORDER BY c.company ASC`
         );
       }
+      let items = [];
+      try {
+        items = await dbAll("SELECT client_id, item_key, status, location, on_file_date FROM client_file_items");
+      } catch (err) {
+        console.error("File checklist unavailable for the summary:", err.message);
+      }
+      const byClient = new Map();
+      for (const it of items) {
+        if (!byClient.has(it.client_id)) byClient.set(it.client_id, {});
+        byClient.get(it.client_id)[it.item_key] = it;
+      }
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+      const staleBefore = `${twoYearsAgo.getFullYear()}-${String(twoYearsAgo.getMonth() + 1).padStart(2, "0")}-${String(twoYearsAgo.getDate()).padStart(2, "0")}`;
       res.json(
         rows.map((r) => {
           const n = (k) => Number(r[k] || 0);
+          const mine = byClient.get(r.id) || {};
+          const paper = (k) => !!mine[k] && mine[k].status === "paper";
+          const reviewDue = Object.values(mine).some((it) => it.status === "paper" && it.on_file_date && it.on_file_date < staleBefore);
           const total = n("kyc_total") + n("pep_total") + n("uploaded_total"); // uploaded forms count as already checked
           const verified = n("kyc_verified") + n("pep_verified") + n("uploaded_total");
           const unsigned = n("kyc_unsigned") + n("pep_unsigned");
+          // A client is complete once their KYC is covered (on paper, filed digitally, or an uploaded copy)
+          // and nothing digital is waiting for a signature or a check.
+          const kycCovered = paper("kyc") || n("kyc_total") > 0 || n("uploaded_total") > 0;
           let stage = "not_started";
-          if (total > 0) stage = unsigned === 0 && verified === total ? "complete" : "in_progress";
+          if (total > 0 || paper("kyc") || paper("pep")) stage = kycCovered && unsigned === 0 && verified === total ? "complete" : "in_progress";
           return {
             client_id: r.id,
             file_no: r.file_no,
@@ -328,6 +419,10 @@ function registerOnboardingRoutes(app, { dbGet, dbAll, dbRun }) {
             pep_total: n("pep_total"),
             pep_verified: n("pep_verified"),
             uploaded_total: n("uploaded_total"),
+            kyc_paper: paper("kyc"),
+            pep_paper: paper("pep"),
+            paper_location: (mine.kyc && mine.kyc.location) || (mine.pep && mine.pep.location) || null,
+            review_due: reviewDue,
             awaiting_signature: unsigned,
             awaiting_verification: total - verified,
             stage,
