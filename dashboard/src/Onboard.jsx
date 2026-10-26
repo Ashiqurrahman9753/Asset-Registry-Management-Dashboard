@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { X, Download, Search } from "lucide-react";
 import { Spinner } from "./Loading.jsx";
 import { Pager, usePaging } from "./Pager.jsx";
+import InfoTip from "./InfoTip.jsx";
 import { BRAND_GREEN_DEEP, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   fetchOnboardingSummary,
@@ -19,6 +20,9 @@ import {
   createDocument,
   fetchUploadedForms,
   createUploadedForm,
+  fetchFileItems,
+  saveFileItem,
+  bulkFileItems,
   downloadDocumentFile,
   openDocumentFile,
 } from "./api.js";
@@ -408,8 +412,7 @@ function ExistingForms({ client, user, items, reload, setNotice, setError }) {
     <div style={{ marginBottom: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <div>
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>Existing forms on file</div>
-          <div style={{ fontSize: 12, color: "#8A8577" }}>Already filled in and signed? Upload the scan or PDF and it is stored here as it is.</div>
+          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>Existing forms on file <InfoTip align="left" text="Already filled in and signed? Upload the scan or PDF and it is stored here as it is." /></div>
         </div>
         <button type="button" onClick={() => setOpen((o) => !o)} style={{ border: `1px solid ${BRAND_GREEN_DEEP}`, background: open ? BRAND_GREEN_DEEP : "#fff", color: open ? "#EDEAE2" : BRAND_GREEN_DEEP, padding: "9px 16px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
           {open ? "Cancel" : "Upload filled forms"}
@@ -479,6 +482,103 @@ function ExistingForms({ client, user, items, reload, setNotice, setError }) {
   );
 }
 
+// ---------- The client file checklist: what paperwork is on file, and where ----------
+
+const FILE_ITEMS = [
+  { key: "kyc", label: "KYC form", hint: "Personal particulars of directors and shareholders" },
+  { key: "pep", label: "PEP declaration", hint: "Only if someone is a politically exposed person" },
+  { key: "id", label: "ID copies", hint: "NRIC / passport copies" },
+  { key: "letter", label: "Engagement letter", hint: "Signed terms of service" },
+];
+
+function FileChecklist({ client, lists, setNotice, setError, onSaved }) {
+  const [items, setItems] = useState(null);
+  const [drafts, setDrafts] = useState({});
+  const [busyKey, setBusyKey] = useState("");
+
+  async function load() {
+    try {
+      const rows = await fetchFileItems(client.id);
+      const map = {};
+      for (const r of rows) map[r.item_key] = r;
+      setItems(map);
+      setDrafts({});
+    } catch (err) {
+      setError(err.message || "Could not load the checklist");
+      setItems({});
+    }
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.id]);
+
+  const view = (key) => {
+    const saved = (items && items[key]) || {};
+    return { status: saved.status || "missing", location: saved.location || "", on_file_date: saved.on_file_date || "", ...(drafts[key] || {}) };
+  };
+  const edit = (key, patch) => setDrafts((d) => ({ ...d, [key]: { ...(d[key] || {}), ...patch } }));
+
+  async function save(key) {
+    const v = view(key);
+    setBusyKey(key);
+    setError("");
+    try {
+      await saveFileItem(client.id, key, { status: v.status, location: v.location, onFileDate: v.on_file_date });
+      await load();
+      setNotice(`${FILE_ITEMS.find((i) => i.key === key).label} saved.`);
+      if (onSaved) onSaved();
+    } catch (err) {
+      setError(err.message || "Could not save");
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  const digitalCount = (key) => {
+    if (key === "kyc") return (lists.kyc || []).length;
+    if (key === "pep") return (lists.pep || []).length;
+    return 0;
+  };
+  const fieldStyle = { border: "1px solid #C9C4B6", padding: "7px 9px", fontSize: 12.5, background: "#fff" };
+
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>Paperwork on file <InfoTip align="left" text="For each item, say whether the paper copy is on file and where it is kept. Forms filled in this app also count." /></div>
+      <div style={{ height: 8 }} />
+      {items === null && <div style={{ color: "#8A8577", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><Spinner size={16} /> Loading…</div>}
+      {items &&
+        FILE_ITEMS.map((it) => {
+          const v = view(it.key);
+          const digital = digitalCount(it.key);
+          const changed = !!drafts[it.key];
+          return (
+            <div key={it.key} style={{ ...box, padding: "10px 14px", marginBottom: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 190px", minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{it.label}</div>
+                {digital > 0 && <div style={{ fontSize: 11, color: "#8A8577" }}>{`${digital} filled in this app`}</div>}
+              </div>
+              <select value={v.status} onChange={(e) => edit(it.key, { status: e.target.value })} style={fieldStyle}>
+                <option value="missing">Missing</option>
+                <option value="paper">On file (paper)</option>
+                <option value="na">Not applicable</option>
+              </select>
+              {v.status === "paper" && (
+                <>
+                  <input value={v.location} onChange={(e) => edit(it.key, { location: e.target.value })} placeholder="Where? e.g. Drawer 3" style={{ ...fieldStyle, width: 170 }} />
+                  <input type="date" value={v.on_file_date} onChange={(e) => edit(it.key, { on_file_date: e.target.value })} style={fieldStyle} title="Date the paper was signed or filed" />
+                </>
+              )}
+              <button type="button" disabled={!changed || busyKey === it.key} onClick={() => save(it.key)} style={{ ...smallBtn, ...(changed ? { background: BRAND_GREEN_DEEP, color: "#EDEAE2", borderColor: BRAND_GREEN_DEEP } : { opacity: 0.5, cursor: "default" }) }}>
+                {busyKey === it.key ? "Saving…" : "Save"}
+              </button>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
 // ---------- The panel for one client ----------
 
 export function ClientOnboarding({ client, user, onClose, onChanged }) {
@@ -526,7 +626,7 @@ export function ClientOnboarding({ client, user, onClose, onChanged }) {
       <div style={{ width: 820, maxWidth: "100%", maxHeight: "92vh", background: "#FBFAF6", padding: 24, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
           <div>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 19, fontWeight: 700 }}>Onboarding</div>
+            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 19, fontWeight: 700 }}>Client file</div>
             <div style={{ fontSize: 12, color: "#8A8577", marginTop: 3 }}>
               {client.company} <span style={{ fontFamily: "monospace" }}>({client.fileNo})</span>
             </div>
@@ -538,6 +638,8 @@ export function ClientOnboarding({ client, user, onClose, onChanged }) {
 
         {error && <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "8px 12px", fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{error}</div>}
         {notice && <div style={{ background: HIGHLIGHT_BG, color: HIGHLIGHT_TEXT, padding: "8px 12px", fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{notice}</div>}
+
+        <FileChecklist client={client} lists={lists} setNotice={setNotice} setError={setError} onSaved={onChanged} />
 
         {["kyc", "pep"].map((kind) => {
           const K = KINDS[kind];
@@ -604,6 +706,31 @@ export function OnboardingHub({ clients, user, onChanged }) {
   const [filter, setFilter] = useState("attention"); // attention | all | not_started | in_progress | complete
   const [activeOnly, setActiveOnly] = useState(true);
   const [openId, setOpenId] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkKeys, setBulkKeys] = useState({ kyc: true, pep: false, id: false, letter: false });
+  const [bulkLocation, setBulkLocation] = useState("");
+  const [bulkDate, setBulkDate] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  async function applyBulk() {
+    const itemKeys = Object.keys(bulkKeys).filter((k) => bulkKeys[k]);
+    if (!selected.size || !itemKeys.length) return;
+    setBulkBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const out = await bulkFileItems({ clientIds: [...selected], itemKeys, location: bulkLocation, onFileDate: bulkDate });
+      setNotice(`${selected.size} client${selected.size === 1 ? "" : "s"} marked as on file (paper) — ${out.saved} item${out.saved === 1 ? "" : "s"} saved.`);
+      setSelected(new Set());
+      await load();
+      if (onChanged) onChanged();
+    } catch (err) {
+      setError(err.message || "Could not save");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function load() {
     try {
@@ -635,6 +762,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
       if (filter === "not_started" && r.stage !== "not_started") return false;
       if (filter === "in_progress" && r.stage !== "in_progress") return false;
       if (filter === "complete" && r.stage !== "complete") return false;
+      if (filter === "review" && !r.review_due) return false;
       if (q && !`${r.company} ${r.file_no}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -658,10 +786,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700 }}>Onboarding</div>
-        <div style={{ fontSize: 12.5, color: "#6B6656", marginTop: 3 }}>
-          Every client&apos;s KYC and PEP paperwork in one place: what&apos;s been filled in, signed and verified, and what&apos;s still waiting.
-        </div>
+        <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700 }}>Compliance <InfoTip align="left" text="Shows which clients have their KYC and PEP paperwork on file, on paper or in this app, and where it is kept. Missing paperwork and paper copies over 2 years old are flagged. Tick several clients to mark them as on file in one go." /></div>
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
@@ -687,6 +812,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
         {chip("not_started", "Not started", counts.not_started)}
         {chip("in_progress", "In progress", counts.in_progress)}
         {chip("complete", "Complete", counts.complete)}
+        {chip("review", "Review due", base.filter((r) => r.review_due).length)}
         {chip("all", "All", base.length)}
         <label style={{ fontSize: 12, color: "#4A4638", display: "flex", alignItems: "center", gap: 5 }}>
           <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} /> Active clients only
@@ -694,6 +820,24 @@ export function OnboardingHub({ clients, user, onChanged }) {
       </div>
 
       {error && <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "8px 12px", fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{error}</div>}
+      {notice && <div style={{ background: HIGHLIGHT_BG, color: HIGHLIGHT_TEXT, padding: "8px 12px", fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{notice}</div>}
+      {selected.size > 0 && (
+        <div style={{ ...box, borderColor: BRAND_GREEN_DEEP, padding: "10px 14px", marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <strong style={{ fontSize: 13 }}>{selected.size} selected</strong>
+          <span style={{ fontSize: 12.5, color: "#4A4638" }}>Mark as on file (paper):</span>
+          {FILE_ITEMS.map((it) => (
+            <label key={it.key} style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="checkbox" checked={!!bulkKeys[it.key]} onChange={(e) => setBulkKeys((k) => ({ ...k, [it.key]: e.target.checked }))} /> {it.label}
+            </label>
+          ))}
+          <input value={bulkLocation} onChange={(e) => setBulkLocation(e.target.value)} placeholder="Where? e.g. Drawer 3" style={{ border: "1px solid #C9C4B6", padding: "7px 9px", fontSize: 12.5, width: 160 }} />
+          <input type="date" value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} style={{ border: "1px solid #C9C4B6", padding: "7px 9px", fontSize: 12.5 }} title="Date the paper was signed or filed (blank = today)" />
+          <button type="button" disabled={bulkBusy} onClick={applyBulk} style={{ background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "8px 16px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {bulkBusy && <Spinner size={13} color="#fff" />} Apply
+          </button>
+          <button type="button" disabled={bulkBusy} onClick={() => setSelected(new Set())} style={{ ...smallBtn, border: "none", background: "none", color: "#6B6656" }}>Clear</button>
+        </div>
+      )}
       {rows === null && <div style={{ color: "#8A8577", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><Spinner size={16} /> Loading…</div>}
 
       {rows && (
@@ -701,6 +845,23 @@ export function OnboardingHub({ clients, user, onChanged }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: "left", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, color: "#8A8577" }}>
+                <th style={{ padding: "10px 12px", borderBottom: "1px solid #E5E1D5", width: 28 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on this page"
+                    checked={paging.pageItems.length > 0 && paging.pageItems.every((r) => selected.has(r.client_id))}
+                    onChange={(e) =>
+                      setSelected((cur) => {
+                        const next = new Set(cur);
+                        for (const r of paging.pageItems) {
+                          if (e.target.checked) next.add(r.client_id);
+                          else next.delete(r.client_id);
+                        }
+                        return next;
+                      })
+                    }
+                  />
+                </th>
                 {["Client", "KYC forms", "PEP declarations", "Waiting for", "Status", ""].map((h) => (
                   <th key={h} style={{ padding: "10px 12px", borderBottom: "1px solid #E5E1D5", fontWeight: 600 }}>{h}</th>
                 ))}
@@ -709,7 +870,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
             <tbody>
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ padding: "22px 12px", textAlign: "center", color: "#8A8577" }}>
+                  <td colSpan={7} style={{ padding: "22px 12px", textAlign: "center", color: "#8A8577" }}>
                     {filter === "attention" ? "Nothing needs attention — every active client's onboarding is complete." : "No clients match."}
                   </td>
                 </tr>
@@ -721,16 +882,36 @@ export function OnboardingHub({ clients, user, onChanged }) {
                 const toVerify = r.awaiting_verification - r.awaiting_signature;
                 if (r.stage !== "not_started" && toVerify > 0) waiting.push(`${toVerify} to verify`);
                 return (
-                  <tr key={r.client_id} style={{ borderBottom: "1px solid #EFEBDF" }}>
+                  <tr key={r.client_id} style={{ borderBottom: "1px solid #EFEBDF", background: selected.has(r.client_id) ? "#F2F7F4" : undefined }}>
+                    <td style={{ padding: "10px 12px" }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${r.company}`}
+                        checked={selected.has(r.client_id)}
+                        onChange={(e) =>
+                          setSelected((cur) => {
+                            const next = new Set(cur);
+                            if (e.target.checked) next.add(r.client_id);
+                            else next.delete(r.client_id);
+                            return next;
+                          })
+                        }
+                      />
+                    </td>
                     <td style={{ padding: "10px 12px" }}>
                       <div style={{ fontWeight: 600 }}>{r.company}</div>
                       <div style={{ fontSize: 11, color: "#8A8577", fontFamily: "monospace" }}>{r.file_no}</div>
                     </td>
-                    <td style={{ padding: "10px 12px" }}>{r.kyc_total === 0 ? <span style={{ color: "#B0AA9A" }}>—</span> : `${r.kyc_verified} of ${r.kyc_total} verified`}</td>
-                    <td style={{ padding: "10px 12px" }}>{r.pep_total === 0 ? <span style={{ color: "#B0AA9A" }}>—</span> : `${r.pep_verified} of ${r.pep_total} verified`}</td>
+                    <td style={{ padding: "10px 12px" }}>
+                      {r.kyc_total > 0 ? `${r.kyc_verified} of ${r.kyc_total} verified` : r.kyc_paper ? <span style={{ color: "#1F4A40" }}>On paper{r.paper_location ? ` · ${r.paper_location}` : ""}</span> : r.uploaded_total > 0 ? <span style={{ color: "#1F4A40" }}>Uploaded copy</span> : <span style={{ color: "#B0AA9A" }}>—</span>}
+                    </td>
+                    <td style={{ padding: "10px 12px" }}>
+                      {r.pep_total > 0 ? `${r.pep_verified} of ${r.pep_total} verified` : r.pep_paper ? <span style={{ color: "#1F4A40" }}>On paper</span> : <span style={{ color: "#B0AA9A" }}>—</span>}
+                    </td>
                     <td style={{ padding: "10px 12px", color: waiting.length ? "#7A2C2E" : "#B0AA9A", fontSize: 12 }}>{waiting.length ? waiting.join(", ") : "—"}</td>
                     <td style={{ padding: "10px 12px" }}>
                       <span style={{ background: st.bg, color: st.fg, fontSize: 11, fontWeight: 700, padding: "3px 9px" }}>{st.label}</span>
+                      {r.review_due && <span title="The paper copy is over 2 years old" style={{ background: "#FBF1E0", color: "#7A5215", fontSize: 11, fontWeight: 700, padding: "3px 9px", marginLeft: 6 }}>Review due</span>}
                     </td>
                     <td style={{ padding: "10px 12px", textAlign: "right" }}>
                       <button type="button" onClick={() => setOpenId(r.client_id)} style={smallBtn}>

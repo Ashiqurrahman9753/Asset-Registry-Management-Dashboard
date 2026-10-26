@@ -464,6 +464,16 @@ export function markKycSigned(id, fileId) {
   return request(`/api/kyc/${id}/signed`, { method: "POST", body: JSON.stringify({ fileId }) });
 }
 
+// Client file checklist: which paperwork is on file for a client, on paper or digital.
+export function fetchFileItems(clientId) {
+  return request(`/api/clients/${clientId}/file-items`);
+}
+export function saveFileItem(clientId, key, payload) {
+  return request(`/api/clients/${clientId}/file-items/${key}`, { method: "PUT", body: JSON.stringify(payload) });
+}
+export function bulkFileItems(payload) {
+  return request(`/api/file-items/bulk`, { method: "POST", body: JSON.stringify(payload) });
+}
 // Forms filled in and signed before the app: the scan or PDF is just stored.
 export function fetchUploadedForms(clientId) {
   return request(`/api/clients/${clientId}/uploaded-forms`);

@@ -10,6 +10,8 @@ import { ComplianceTiles, countUrgent } from "./Comply.jsx";
 import { Spinner, LoadingPanel, TopBar } from "./Loading.jsx";
 import { Pager, usePaging } from "./Pager.jsx";
 import { LiveClock } from "./Clock.jsx";
+import ScanCompliance from "./ScanFile.jsx";
+import InfoTip from "./InfoTip.jsx";
 import { OnboardingHub, ClientOnboarding } from "./Onboard.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
@@ -911,7 +913,7 @@ function Dashboard({ user, onLogout }) {
           {[
             { key: "dashboard", label: "Dashboard" },
             { key: "clients", label: "Clients" },
-            { key: "onboarding", label: "Onboarding" },
+            { key: "onboarding", label: "Compliance" },
             { key: "register", label: "Register" },
             { key: "report", label: "Report" },
             { key: "scan", label: "Scan lookup" },
@@ -1202,10 +1204,6 @@ function Dashboard({ user, onLogout }) {
 
         {tab === "register" && (
           <>
-            <div style={{ fontSize: 12, color: "#8A8577", marginBottom: 12 }}>
-              Every document ever logged, across every client — the master ledger. Look here to find one specific entry by
-              code or client; for a client's own documents, open them from the Clients tab instead.
-            </div>
             {/* Search + filter */}
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, ...glassPanel(0.55, 10), padding: "8px 12px", flex: 1 }}>
@@ -1227,6 +1225,7 @@ function Dashboard({ user, onLogout }) {
                   <option key={c.key} value={c.key}>{c.label}</option>
                 ))}
               </select>
+              <InfoTip text="Every document ever logged, for every client. Search by client name or document code. For one client's documents, open the client from the Clients tab." />
             </div>
 
             {/* Table */}
@@ -1417,6 +1416,8 @@ function Dashboard({ user, onLogout }) {
                     </button>
                   )}
 
+                  <ScanCompliance clientId={scanResult.resultType === "client" ? scanResult.id : scanResult.clientId} schedules={schedules} />
+
                   {(() => {
                     const historyClientId = scanResult.resultType === "client" ? scanResult.id : scanResult.clientId;
                     const history = entries.filter((e) => e.clientId === historyClientId).slice(0, 8);
@@ -1489,9 +1490,8 @@ function Dashboard({ user, onLogout }) {
 
         {tab === "log" && (
           <>
-            <div style={{ fontSize: 12, color: "#8A8577", marginBottom: 12 }}>
-              A record of every time a physical document was checked out or back in — proof of who took what and when, for
-              when a client or auditor asks "where is this paper right now."
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+              <InfoTip text="Every time a paper document was taken out or returned: who, and when. Use it to answer where a paper is right now." />
             </div>
             <div style={{ ...glassPanel(0.55, 10) }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -2938,11 +2938,8 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
               <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "8px 12px", fontSize: 12, fontWeight: 600, marginTop: 14 }}>{parseError}</div>
             )}
 
-            <div style={{ fontSize: 11, color: "#8A8577", marginTop: 16, lineHeight: 1.5 }}>
-              Required columns: Company, ROC, FYE, Date Incorporated, Registered Address, Directors, Contact Name, Contact
-              Phone. File No, Fax, Contact Email, and Status are optional. List multiple directors in one cell separated by
-              semicolons. Leave File No blank to have one assigned automatically — fill it in only to preserve an existing
-              file number (e.g. migrating clients who already have a physical folder).
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+              <InfoTip align="right" text="Needed columns: Company, ROC, FYE, Date Incorporated, Registered Address, Directors, Contact Name, Contact Phone. Optional: File No, Fax, Contact Email, Status. Separate several directors with semicolons. Leave File No blank to get one automatically, or fill it to keep an existing folder number." />
             </div>
           </div>
         )}
@@ -3230,9 +3227,6 @@ function DashboardOverview({ clients, entries, log, schedules, docCountFor, onOp
                 <X size={18} />
               </button>
             </div>
-            <div style={{ fontSize: 12, color: "#8A8577", marginBottom: 16 }}>
-              Active clients whose Annual Return deadline is here or coming up — review and file before it's overdue.
-            </div>
             {upcomingDeadlines.length === 0 ? (
               <div style={{ fontSize: 13, color: "#8A8577", padding: "20px 0", textAlign: "center" }}>Nothing due in the next 30 days.</div>
             ) : (
@@ -3468,10 +3462,8 @@ function ReportTab({ clients, entries, onSaveField, onOpenClient, onRefresh }) {
         />
       )}
 
-      <div style={{ fontSize: 12, color: "#8A8577", marginBottom: 12 }}>
-        A spreadsheet-style view of every client — ACRA Status, Tax Notes, and Pending Work are quick working notes any
-        staff member can edit here (not auto-fetched — see chat for why). Service Taken and Last Activity are derived
-        automatically from the document log.
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <InfoTip text="One row per client. ACRA Status, Tax Notes and Pending Work are notes you type in. Service Taken and Last Activity fill in by themselves from the document log." />
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, ...glassPanel(0.55, 10), padding: "8px 12px", flex: 1 }}>
@@ -3745,8 +3737,8 @@ function ReportImportModal({ onClose, onImported, clients }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div>
             <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700 }}>Update report from Excel</div>
-            <div style={{ fontSize: 12, color: "#8A8577", marginTop: 3 }}>
-              Upload the report after editing it — matched by File No, updates ACRA Status, Tax Notes, and Pending Work only.
+            <div style={{ marginTop: 6 }}>
+              <InfoTip align="left" text="Upload the report after editing it in Excel. Rows are matched by File No, so leave that column as it is. Only ACRA Status, Tax Notes and Pending Work are updated. Tip: export the report first, edit those three columns, then upload." />
             </div>
           </div>
           <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }}>
@@ -3785,10 +3777,6 @@ function ReportImportModal({ onClose, onImported, clients }) {
             {parseError && (
               <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "8px 12px", fontSize: 12, fontWeight: 600, marginTop: 14 }}>{parseError}</div>
             )}
-            <div style={{ fontSize: 11, color: "#8A8577", marginTop: 16, lineHeight: 1.5 }}>
-              Easiest way to get a valid file: export the report first, edit the ACRA Status / Tax Notes / Pending Work
-              columns in Excel, then upload it here. File No must be untouched — it's how each row is matched back to a client.
-            </div>
           </div>
         )}
 
