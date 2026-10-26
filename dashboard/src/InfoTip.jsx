@@ -66,7 +66,7 @@ export default function InfoTip({ text, align = "right", size = 16 }) {
             maxWidth: "70vw",
             background: "#1C2430",
             color: "#EDEAE2",
-            fontFamily: "'Inter', system-ui, sans-serif",
+            fontFamily: "'Public Sans', system-ui, sans-serif",
             fontStyle: "normal",
             fontWeight: 400,
             fontSize: 12,

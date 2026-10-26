@@ -464,6 +464,14 @@ export function markKycSigned(id, fileId) {
   return request(`/api/kyc/${id}/signed`, { method: "POST", body: JSON.stringify({ fileId }) });
 }
 
+// The signed-in user's own name, job title and phone.
+export function fetchMyProfile() {
+  return request("/api/users/me");
+}
+export function saveMyProfile(payload) {
+  return request("/api/users/me", { method: "PATCH", body: JSON.stringify(payload) });
+}
+
 // Client file checklist: which paperwork is on file for a client, on paper or digital.
 export function fetchFileItems(clientId) {
   return request(`/api/clients/${clientId}/file-items`);

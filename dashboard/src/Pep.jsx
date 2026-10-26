@@ -142,7 +142,7 @@ export function PepForm({ client, user, knownNames, onClose, onSaved }) {
       <Shell>
         <div style={{ textAlign: "center", padding: "70px 10px" }}>
           <CheckCircle2 size={52} color="#2F6F62" />
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 28, fontWeight: 700, marginTop: 14 }}>Thank you</div>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 28, fontWeight: 700, marginTop: 14 }}>Thank you</div>
           <div style={{ fontSize: 18, color: "#4A4638", marginTop: 10, lineHeight: 1.6 }}>
             {byHand ? "Your declaration has been received. A member of staff will now print it for you to sign." : "Your declaration has been received. Please hand the device back to a member of staff."}
           </div>
@@ -175,7 +175,7 @@ export function PepForm({ client, user, knownNames, onClose, onSaved }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
         <div>
           <div style={{ fontSize: 13, color: "#8A8577", letterSpacing: 0.5, textTransform: "uppercase" }}>{FIRM_NAME}</div>
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 28, fontWeight: 700, marginTop: 2, lineHeight: 1.15 }}>Politically exposed person (PEP) declaration</div>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 28, fontWeight: 700, marginTop: 2, lineHeight: 1.15 }}>Politically exposed person (PEP) declaration</div>
           <div style={{ fontSize: 16, color: "#4A4638", marginTop: 6 }}>For: {company}</div>
         </div>
         <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: "#8A8577", fontSize: 12, flexShrink: 0 }}>

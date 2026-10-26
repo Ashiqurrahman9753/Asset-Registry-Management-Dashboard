@@ -29,7 +29,7 @@ export default function Login({ onLoggedIn }) {
   return (
     <div
       style={{
-        fontFamily: "'Inter', system-ui, sans-serif",
+        fontFamily: "'Public Sans', system-ui, sans-serif",
         minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
@@ -61,7 +61,7 @@ export default function Login({ onLoggedIn }) {
             style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 10 }}
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700, color: "#1C2430", letterSpacing: 0.3 }}>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 20, fontWeight: 700, color: "#1C2430", letterSpacing: 0.3 }}>
             JARDEEN MANAGEMENT
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
@@ -156,7 +156,7 @@ export function FirstRunSetup({ onLoggedIn }) {
   return (
     <div
       style={{
-        fontFamily: "'Inter', system-ui, sans-serif",
+        fontFamily: "'Public Sans', system-ui, sans-serif",
         minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
@@ -188,7 +188,7 @@ export function FirstRunSetup({ onLoggedIn }) {
             style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 10 }}
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700, color: "#1C2430", letterSpacing: 0.3 }}>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 20, fontWeight: 700, color: "#1C2430", letterSpacing: 0.3 }}>
             JARDEEN MANAGEMENT
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
@@ -263,6 +263,6 @@ const inputStyle = {
   background: "#fff",
   padding: "8px 10px",
   fontSize: 13,
-  fontFamily: "'Inter', sans-serif",
+  fontFamily: "'Public Sans', sans-serif",
   color: "#1C2430",
 };

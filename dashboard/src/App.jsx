@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip, KeyRound } from "lucide-react";
+import { Plus, Search, Printer, Clock, ShieldAlert, FileText, X, LogOut, LogIn, ScanLine, CheckCircle2, AlertCircle, Building2, ArrowRight, ArrowLeft, User, UserPlus, ChevronDown, ChevronUp, Phone, Pencil, Package, Info, Upload, Download, Loader2, LayoutGrid, AlertTriangle, CalendarClock, Activity, Paperclip, KeyRound } from "lucide-react";
 import Login, { FirstRunSetup } from "./Login.jsx";
-import UpdateManager from "./UpdateManager.jsx";
+import UpdateManager from "./Updater.jsx";
 import FilingHelper from "./Filing.jsx";
 import ClientFiles from "./Vault.jsx";
 import { computeNextDue } from "./deadlines.js";
@@ -11,11 +11,14 @@ import { Spinner, LoadingPanel, TopBar } from "./Loading.jsx";
 import { Pager, usePaging } from "./Pager.jsx";
 import { LiveClock } from "./Clock.jsx";
 import ScanCompliance from "./ScanFile.jsx";
+import BackButton from "./Back.jsx";
 import InfoTip from "./InfoTip.jsx";
+import { NavDropdown, ProfileModal } from "./Header.jsx";
 import { OnboardingHub, ClientOnboarding } from "./Onboard.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
   getStoredUser,
+  fetchMyProfile,
   clearSession,
   fetchSetupStatus,
   fetchClients,
@@ -187,10 +190,10 @@ function Label({ entry }) {
   const style = CAT_STYLE[entry.category];
   const cat = CATEGORIES.find((c) => c.key === entry.category);
   return (
-    <div style={{ width: 300, border: "1px solid #C9C4B6", background: "#FBFAF6", display: "flex", fontFamily: "'Fraunces', Georgia, serif" }}>
+    <div style={{ width: 300, border: "1px solid #C9C4B6", background: "#FBFAF6", display: "flex", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
       <div style={{ width: 10, background: style.bar }} />
       <div style={{ padding: "12px 14px", flex: 1 }}>
-        <div style={{ fontSize: 10, letterSpacing: 1, color: "#8A8577", marginBottom: 4, fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ fontSize: 10, letterSpacing: 1, color: "#8A8577", marginBottom: 4, fontFamily: "'Public Sans', sans-serif" }}>
           {cat.sensitivity} · Financial Asset Register
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#1C2430", marginBottom: 2 }}>{entry.client}</div>
@@ -206,7 +209,7 @@ function Label({ entry }) {
           }}
         />
         <div style={{ fontFamily: "monospace", fontSize: 11, color: "#1C2430" }}>{entry.code}</div>
-        <div style={{ fontSize: 10, color: "#8A8577", marginTop: 4, fontFamily: "'Inter', sans-serif" }}>{entry.location}</div>
+        <div style={{ fontSize: 10, color: "#8A8577", marginTop: 4, fontFamily: "'Public Sans', sans-serif" }}>{entry.location}</div>
       </div>
     </div>
   );
@@ -214,10 +217,10 @@ function Label({ entry }) {
 
 function ClientLabel({ client }) {
   return (
-    <div style={{ width: 300, border: "1px solid #C9C4B6", background: "#FBFAF6", display: "flex", fontFamily: "'Fraunces', Georgia, serif" }}>
+    <div style={{ width: 300, border: "1px solid #C9C4B6", background: "#FBFAF6", display: "flex", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
       <div style={{ width: 10, background: "#1C2430" }} />
       <div style={{ padding: "12px 14px", flex: 1 }}>
-        <div style={{ fontSize: 10, letterSpacing: 1, color: "#8A8577", marginBottom: 4, fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ fontSize: 10, letterSpacing: 1, color: "#8A8577", marginBottom: 4, fontFamily: "'Public Sans', sans-serif" }}>
           Client Master File · Financial Asset Register
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#1C2430", marginBottom: 2 }}>{client.company}</div>
@@ -240,8 +243,8 @@ function ClientLabel({ client }) {
 
 function BoxLabel({ entry }) {
   return (
-    <div style={{ width: 300, border: "2px solid #1C2430", background: "#FBFAF6", fontFamily: "'Fraunces', Georgia, serif" }}>
-      <div style={{ background: "#1C2430", color: "#EDEAE2", padding: "6px 14px", fontSize: 11, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ width: 300, border: "2px solid #1C2430", background: "#FBFAF6", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
+      <div style={{ background: "#1C2430", color: "#EDEAE2", padding: "6px 14px", fontSize: 11, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'Public Sans', sans-serif" }}>
         BULK INTAKE — NOT YET SORTED
       </div>
       <div style={{ padding: "12px 14px" }}>
@@ -260,7 +263,7 @@ function BoxLabel({ entry }) {
           }}
         />
         <div style={{ fontFamily: "monospace", fontSize: 11, color: "#1C2430" }}>{entry.code}</div>
-        <div style={{ fontSize: 10, color: "#8A8577", marginTop: 4, fontFamily: "'Inter', sans-serif" }}>{entry.location}</div>
+        <div style={{ fontSize: 10, color: "#8A8577", marginTop: 4, fontFamily: "'Public Sans', sans-serif" }}>{entry.location}</div>
       </div>
     </div>
   );
@@ -304,6 +307,30 @@ function Dashboard({ user, onLogout }) {
   const [clientStatusFilter, setClientStatusFilter] = useState("all");
   const [hoveredClientId, setHoveredClientId] = useState(null);
   const [clientPage, setClientPage] = useState(1);
+  // The top bar can be shrunk to a single menu button; the choice is remembered on this computer.
+  const [navCompact, setNavCompact] = useState(() => {
+    try {
+      return localStorage.getItem("fams_nav_compact") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [profileName, setProfileName] = useState("");
+  useEffect(() => {
+    fetchMyProfile()
+      .then((p) => setProfileName(p.fullName || ""))
+      .catch(() => {});
+  }, []);
+  function toggleNavCompact() {
+    setNavCompact((c) => {
+      try {
+        localStorage.setItem("fams_nav_compact", c ? "0" : "1");
+      } catch {
+        /* storage unavailable — just not remembered */
+      }
+      return !c;
+    });
+  }
   const [activeLetter, setActiveLetter] = useState(null);
   const clientTileRefs = useRef({});
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -877,7 +904,7 @@ function Dashboard({ user, onLogout }) {
 
   if (loading) {
     return (
-      <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B6656", position: "relative" }}>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B6656", position: "relative" }}>
         <Wallpaper />
         <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
           <Spinner size={42} color={BRAND_GREEN_DEEP} thickness={3.4} />
@@ -891,7 +918,7 @@ function Dashboard({ user, onLogout }) {
   const urgentFilings = countUrgent(clients, schedules);
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", minHeight: "100vh", color: "#1C2430", position: "relative" }}>
+    <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", minHeight: "100vh", color: "#1C2430", position: "relative" }}>
       <TopBar active={refreshing} />
       <Wallpaper />
       {/* Header — clean light nav bar: wordmark left, flat nav links center, actions right */}
@@ -904,61 +931,93 @@ function Dashboard({ user, onLogout }) {
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
           <div>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 17, fontWeight: 700, letterSpacing: 0.2, color: "#1C2430", lineHeight: 1.1 }}>JARDEEN MANAGEMENT</div>
-            <div style={{ fontSize: 10, color: "#8A8577", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.6 }}>Financial Asset Register</div>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 17, fontWeight: 700, letterSpacing: 0.2, color: "#1C2430", lineHeight: 1.1 }}>JARDEEN MANAGEMENT</div>
+            {!navCompact && <div style={{ fontSize: 10, color: "#8A8577", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.6 }}>Financial Asset Register</div>}
           </div>
         </div>
 
-        <nav style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-          {[
-            { key: "dashboard", label: "Dashboard" },
-            { key: "clients", label: "Clients" },
-            { key: "onboarding", label: "Compliance" },
-            { key: "register", label: "Register" },
-            { key: "report", label: "Report" },
-            { key: "scan", label: "Scan lookup" },
-            { key: "log", label: "Access log" },
-          ].map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              style={{
-                padding: "8px 14px",
-                background: "none",
-                border: "none",
-                borderBottom: tab === t.key ? `2px solid ${BRAND_GREEN_BRIGHT}` : "2px solid transparent",
-                color: tab === t.key ? BRAND_GREEN_DEEP : "#4A4638",
-                fontWeight: 600,
-                fontSize: 12.5,
-                textTransform: "uppercase",
-                letterSpacing: 0.6,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              {t.key === "dashboard" && <LayoutGrid size={13} />}
-              {t.key === "scan" && <ScanLine size={13} />}
-              {t.label}
-              {t.key === "dashboard" && urgentFilings > 0 && (
-                <span title={`${urgentFilings} CPF / GST filings overdue or due within 5 days`} style={{ background: "#A63D40", color: "#fff", fontSize: 10, fontWeight: 800, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", animation: "fams-pulse 1.8s infinite" }}>
-                  {urgentFilings}
-                </span>
-              )}
-            </button>
-          ))}
+        <nav style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0 }}>
+          {(() => {
+            const mainTabs = [
+              { key: "dashboard", label: "Dashboard" },
+              { key: "clients", label: "Clients" },
+              { key: "onboarding", label: "Compliance" },
+              { key: "register", label: "Register" },
+              { key: "report", label: "Report" },
+            ];
+            const allTabs = [...mainTabs, { key: "scan", label: "Scan lookup" }];
+            const labelOf = (k) => (k === "log" ? "Activity log" : (allTabs.find((x) => x.key === k) || {}).label || "Menu");
+            if (navCompact) {
+              return (
+                <NavDropdown
+                  strong
+                  active
+                  label={labelOf(tab)}
+                  items={allTabs.map((x) => ({ key: x.key, label: x.label, active: tab === x.key, icon: x.key === "scan" ? <ScanLine size={14} /> : null, badge: x.key === "dashboard" && urgentFilings > 0 ? urgentFilings : null }))}
+                  onPick={setTab}
+                />
+              );
+            }
+            return (
+              <>
+                {mainTabs.map((x) => (
+                  <button
+                    key={x.key}
+                    onClick={() => setTab(x.key)}
+                    style={{
+                      padding: "8px 14px",
+                      background: "none",
+                      border: "none",
+                      borderBottom: tab === x.key ? `2px solid ${BRAND_GREEN_BRIGHT}` : "2px solid transparent",
+                      color: tab === x.key ? BRAND_GREEN_DEEP : "#4A4638",
+                      fontWeight: 600,
+                      fontSize: 12.5,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.6,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {x.key === "dashboard" && <LayoutGrid size={13} />}
+                    {x.label}
+                    {x.key === "dashboard" && urgentFilings > 0 && (
+                      <span title={`${urgentFilings} CPF / GST filings overdue or due within 5 days`} style={{ background: "#A63D40", color: "#fff", fontSize: 10, fontWeight: 800, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", animation: "fams-pulse 1.8s infinite" }}>
+                        {urgentFilings}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                <NavDropdown
+                  label="More"
+                  active={tab === "scan"}
+                  items={[{ key: "scan", label: "Scan lookup", active: tab === "scan", icon: <ScanLine size={14} /> }]}
+                  onPick={setTab}
+                />
+              </>
+            );
+          })()}
         </nav>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-          <LiveClock />
+          {!navCompact && <LiveClock />}
           <button
             onClick={openEntryForm}
             style={{ display: "flex", alignItems: "center", gap: 6, background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "9px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}
           >
             <Plus size={16} /> New entry
           </button>
-          <UserMenu user={user} onLogout={onLogout} />
+          <UserMenu user={user} onLogout={onLogout} profileName={profileName} onOpenLog={() => setTab("log")} onProfileSaved={(p) => setProfileName(p.fullName || "")} />
+          <button
+            type="button"
+            onClick={toggleNavCompact}
+            title={navCompact ? "Show the full top bar" : "Make the top bar compact"}
+            aria-label={navCompact ? "Show the full top bar" : "Make the top bar compact"}
+            style={{ width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #C9C4B6", background: "rgba(255,255,255,0.6)", color: "#4A4638", cursor: "pointer", flexShrink: 0 }}
+          >
+            {navCompact ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+          </button>
         </div>
       </div>
 
@@ -1540,8 +1599,9 @@ function Dashboard({ user, onLogout }) {
         >
           <div style={{ width: 480, maxWidth: "100%", maxHeight: "88vh", ...glassPanel(0.94, 22), padding: 26, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid rgba(201,196,182,0.5)" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={closeEntryForm} />
               <div>
-                <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700, color: "#1C2430" }}>
+                <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: "#1C2430" }}>
                   {entryStep === "new-client" ? "New client" : entryStep === "onboarded" ? "Client added" : "New register entry"}
                 </div>
                 <div style={{ fontSize: 12, color: "#8A8577", marginTop: 3 }}>
@@ -1549,7 +1609,7 @@ function Dashboard({ user, onLogout }) {
                   {entryStep === "new-client" && "This company isn't in the register yet — add their details below."}
                   {entryStep === "document" && selectedClient && `Client: ${selectedClient.company} (${selectedClient.fileNo})`}
                 </div>
-              </div>
+              </div></div>
               <button onClick={closeEntryForm} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0, color: "#6B6656" }}><X size={18} /></button>
             </div>
 
@@ -2010,7 +2070,7 @@ function Dashboard({ user, onLogout }) {
           <div style={{ ...glassPanel(0.96, 22), width: 360, maxWidth: "100%", padding: 22, boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               <ShieldAlert size={18} color="#A63D40" />
-              <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>Show sensitive details?</div>
+              <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700 }}>Show sensitive details?</div>
             </div>
             <div style={{ fontSize: 13, color: "#4A4638", marginBottom: 18 }}>
               This reveals the client's ROC number and personal contact details (phone, email) on screen. Only continue if
@@ -2100,7 +2160,7 @@ function Dashboard({ user, onLogout }) {
           }}
         >
           <div style={{ background: "#FBFAF6", padding: 24, border: "1px solid #C9C4B6", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700, marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700, marginBottom: 14 }}>
               {printPreview.isBatch ? "Box label preview" : "Label preview"}
             </div>
             {printPreview.isBatch ? <BoxLabel entry={printPreview} /> : <Label entry={printPreview} />}
@@ -2138,7 +2198,7 @@ function Dashboard({ user, onLogout }) {
           }}
         >
           <div style={{ background: "#FBFAF6", padding: 24, border: "1px solid #C9C4B6", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Folder label preview</div>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Folder label preview</div>
             <ClientLabel client={clientLabelPreview} />
             {printStatus && (
               <div style={{ marginTop: 12, fontSize: 12.5, fontWeight: 600, color: printStatus.ok ? "#1F4A40" : "#7A2C2E" }}>
@@ -2189,8 +2249,9 @@ function Dashboard({ user, onLogout }) {
             {clientDetailMode === "view" && (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={closeClientDetail} />
                   <div>
-                    <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 19, fontWeight: 700 }}>{clientDetail.company}</div>
+                    <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 19, fontWeight: 700 }}>{clientDetail.company}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                       <span style={{ fontFamily: "monospace", fontSize: 12, color: "#8A8577" }}>{clientDetail.fileNo}</span>
                       <span
@@ -2205,7 +2266,7 @@ function Dashboard({ user, onLogout }) {
                         {CLIENT_STATUS[clientDetail.status].label}
                       </span>
                     </div>
-                  </div>
+                  </div></div>
                   <button onClick={closeClientDetail} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }}>
                     <X size={18} />
                   </button>
@@ -2364,10 +2425,11 @@ function Dashboard({ user, onLogout }) {
             {clientDetailMode === "edit" && editClientForm && (
               <form onSubmit={submitEditClient} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "inline-flex", alignItems: "center", fontFamily: "'Fraunces', Georgia, serif", fontSize: 17, fontWeight: 700 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={() => setClientDetailMode("view")} />
+                  <div style={{ display: "inline-flex", alignItems: "center", fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 17, fontWeight: 700 }}>
                     Edit client
                     <InfoHint text="Admin only. Every changed field is recorded with your username and the time." />
-                  </div>
+                  </div></div>
                   <button type="button" onClick={closeClientDetail} style={{ border: "none", background: "none", cursor: "pointer" }}>
                     <X size={18} />
                   </button>
@@ -2512,9 +2574,10 @@ function DirectorsInput({ value, onChange }) {
   );
 }
 
-function UserMenu({ user, onLogout }) {
+function UserMenu({ user, onLogout, profileName, onOpenLog, onProfileSaved }) {
   const [open, setOpen] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -2531,7 +2594,7 @@ function UserMenu({ user, onLogout }) {
         onClick={() => setOpen((o) => !o)}
         style={{ display: "flex", alignItems: "center", gap: 6, background: "none", color: "#1C2430", border: "1px solid #C9C4B6", padding: "10px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
       >
-        <User size={14} /> {user.username} ({user.role}) <ChevronDown size={12} />
+        <User size={14} /> {profileName || user.username}{profileName ? "" : ` (${user.role})`} <ChevronDown size={12} />
       </button>
       {open && (
         <div
@@ -2545,6 +2608,24 @@ function UserMenu({ user, onLogout }) {
             zIndex: 30,
           }}
         >
+          <button
+            onClick={() => {
+              setOpen(false);
+              setShowProfile(true);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#1C2430" }}
+          >
+            <User size={14} /> My profile
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onOpenLog();
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#1C2430" }}
+          >
+            <Activity size={14} /> Activity log
+          </button>
           <button
             onClick={() => {
               setOpen(false);
@@ -2566,6 +2647,7 @@ function UserMenu({ user, onLogout }) {
         </div>
       )}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
+      {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} onSaved={onProfileSaved} />}
     </div>
   );
 }
@@ -2608,7 +2690,7 @@ function ChangePasswordModal({ onClose }) {
         style={{ ...glassPanel(0.96, 18), padding: "24px 26px", width: 360, display: "flex", flexDirection: "column", gap: 12 }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#1C2430" }}>Change password</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><BackButton onClick={onClose} /><div style={{ fontSize: 15, fontWeight: 700, color: "#1C2430" }}>Change password</div></div>
           <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: "#8A8577" }}>
             <X size={16} />
           </button>
@@ -2886,12 +2968,13 @@ function BulkImportClients({ onClose, onImported, existingClients }) {
     >
       <div style={{ width: 640, maxWidth: "100%", maxHeight: "88vh", background: "#FBFAF6", padding: 24, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={onClose} />
           <div>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700 }}>Import clients</div>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 18, fontWeight: 700 }}>Import clients</div>
             <div style={{ fontSize: 12, color: "#8A8577", marginTop: 3 }}>
               For onboarding a backlog at once, instead of adding clients one by one.
             </div>
-          </div>
+          </div></div>
           <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }}>
             <X size={18} />
           </button>
@@ -3091,10 +3174,10 @@ function DonutChart({ data, size = 150, thickness = 20, centerValue, centerLabel
             cumulative += dash;
             return el;
           })}
-      <text x="50%" y="47%" textAnchor="middle" fontSize={size * 0.19} fontWeight="700" fill="#1C2430" fontFamily="'Fraunces', Georgia, serif">
+      <text x="50%" y="47%" textAnchor="middle" fontSize={size * 0.19} fontWeight="700" fill="#1C2430" fontFamily="'Public Sans', system-ui, sans-serif">
         {centerValue}
       </text>
-      <text x="50%" y="63%" textAnchor="middle" fontSize={size * 0.075} fill="#8A8577" fontFamily="'Inter', sans-serif" letterSpacing="0.5">
+      <text x="50%" y="63%" textAnchor="middle" fontSize={size * 0.075} fill="#8A8577" fontFamily="'Public Sans', sans-serif" letterSpacing="0.5">
         {centerLabel}
       </text>
     </svg>
@@ -3222,7 +3305,7 @@ function DashboardOverview({ clients, entries, log, schedules, docCountFor, onOp
             style={{ width: 520, maxWidth: "100%", maxHeight: "80vh", ...glassPanel(0.96, 22), padding: 24, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 17, fontWeight: 700 }}>Filings due within 30 days</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}><BackButton onClick={() => setShowDeadlines(false)} /><div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 17, fontWeight: 700 }}>Filings due within 30 days</div></div>
               <button onClick={() => setShowDeadlines(false)} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }}>
                 <X size={18} />
               </button>
@@ -3735,12 +3818,13 @@ function ReportImportModal({ onClose, onImported, clients }) {
     >
       <div style={{ width: 640, maxWidth: "100%", maxHeight: "88vh", ...glassPanel(0.94, 22), padding: 24, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={onClose} />
           <div>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700 }}>Update report from Excel</div>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 18, fontWeight: 700 }}>Update report from Excel</div>
             <div style={{ marginTop: 6 }}>
               <InfoTip align="left" text="Upload the report after editing it in Excel. Rows are matched by File No, so leave that column as it is. Only ACRA Status, Tax Notes and Pending Work are updated. Tip: export the report first, edit those three columns, then upload." />
             </div>
-          </div>
+          </div></div>
           <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }}>
             <X size={18} />
           </button>
@@ -3864,7 +3948,7 @@ function StatCard({ label, value, icon, accent, onClick, hint }) {
         {icon}
         <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
       </div>
-      <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 26, fontWeight: 700 }}>{value}</div>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 26, fontWeight: 700 }}>{value}</div>
       {hint && <div style={{ fontSize: 10, color: BRAND_GREEN, fontWeight: 600, marginTop: 4 }}>{hint}</div>}
     </div>
   );
@@ -4291,6 +4375,6 @@ const inputStyle = {
   background: "#fff",
   padding: "8px 10px",
   fontSize: 13,
-  fontFamily: "'Inter', sans-serif",
+  fontFamily: "'Public Sans', sans-serif",
   color: "#1C2430",
 };

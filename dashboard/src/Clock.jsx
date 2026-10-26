@@ -67,7 +67,7 @@ export function LiveClock({ variant = "compact" }) {
       <div role="timer" aria-label={label} style={{ textAlign: "center", position: "relative", zIndex: 1, marginBottom: 22, animation: "fams-fade 0.5s ease-out" }}>
         <div style={{ fontSize: 12, letterSpacing: 2.4, textTransform: "uppercase", color: "#4A4638", fontWeight: 600, marginBottom: 6 }}>{greeting(h)}</div>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 18 }}>
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 64, fontWeight: 600, color: "#1C2430", lineHeight: 1, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 64, fontWeight: 600, color: "#1C2430", lineHeight: 1, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
             {pad(h)}
             <span style={{ color: BRAND_GREEN_BRIGHT, opacity: s % 2 === 0 ? 1 : 0.25, transition: "opacity 0.4s" }}>:</span>
             {pad(m)}
@@ -101,9 +101,9 @@ export function LiveClock({ variant = "compact" }) {
         <div style={{ width: 6, height: 6, borderRadius: 999, background: BRAND_GREEN_BRIGHT, opacity: s % 2 === 0 ? 1 : 0.35, transition: "opacity 0.4s" }} />
       </div>
       <div style={{ lineHeight: 1.15 }}>
-        <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 15, fontWeight: 700, color: "#1C2430", fontVariantNumeric: "tabular-nums" }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 15, fontWeight: 700, color: "#1C2430", fontVariantNumeric: "tabular-nums" }}>
           {pad(h)}:{pad(m)}
-          <span style={{ fontSize: 11, color: BRAND_GREEN_DEEP, marginLeft: 3, fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 600 }}>{pad(s)}</span>
+          <span style={{ fontSize: 11, color: BRAND_GREEN_DEEP, marginLeft: 3, fontFamily: "'Public Sans', system-ui, sans-serif", fontWeight: 600 }}>{pad(s)}</span>
         </div>
         <div style={{ fontSize: 10.5, color: "#6B6656", letterSpacing: 0.3 }}>
           {now.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}

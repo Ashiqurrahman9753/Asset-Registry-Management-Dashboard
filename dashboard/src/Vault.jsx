@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import BackButton from "./Back.jsx";
 import { X, Download, ArrowLeft, ArrowRight, Upload, Search, LayoutGrid, List } from "lucide-react";
 import { BRAND_GREEN, BRAND_GREEN_DEEP, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import { fetchClientFiles, fetchFileBytes, uploadDocumentFile, downloadDocumentFile, openDocumentFile } from "./api.js";
@@ -582,7 +583,7 @@ function FileViewer({ files, index, onIndex, onClose }) {
 
         {showInfo && (
           <div className="fv-scroll" style={{ width: 290, background: "#161C23", borderLeft: "1px solid #232B35", color: "#EDEAE2", overflowY: "auto", padding: "18px 18px", flexShrink: 0, animation: "fams-fade 0.18s ease-out" }}>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 15, fontWeight: 700, marginBottom: 14 }}>File details</div>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 14 }}>File details</div>
             {infoRows.map(([label, value]) => (
               <div key={label} style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 10, color: "#8A93A0", textTransform: "uppercase", letterSpacing: 0.6 }}>{label}</div>
@@ -808,7 +809,7 @@ export default function ClientFiles({ client, documents, onClose }) {
     <div key={g.label || `g${gi}`} style={{ marginBottom: 22 }}>
       {g.label && (
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "0 0 10px" }}>
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 15, fontWeight: 700, color: "#1C2430" }}>{g.label}</div>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 15, fontWeight: 700, color: "#1C2430" }}>{g.label}</div>
           <div style={{ fontSize: 11.5, color: "#8A8577" }}>{g.items.length} file{g.items.length === 1 ? "" : "s"}</div>
           <div style={{ flex: 1, height: 1, background: "#E5E1D5", alignSelf: "center" }} />
         </div>
@@ -856,13 +857,14 @@ export default function ClientFiles({ client, documents, onClose }) {
         {/* Header */}
         <div style={{ padding: "20px 26px 14px", borderBottom: "1px solid #E5E1D5" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={onClose} />
             <div>
-              <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 22, fontWeight: 700 }}>Documents</div>
+              <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 22, fontWeight: 700 }}>Documents</div>
               <div style={{ fontSize: 12.5, color: "#6B6656", marginTop: 3 }}>
                 {client.company} <span style={{ fontFamily: "monospace", color: "#8A8577" }}>({client.fileNo})</span>
                 {files ? ` · ${files.length} file${files.length === 1 ? "" : "s"} · ${formatSize(totalBytes) || "0 KB"}` : ""}
               </div>
-            </div>
+            </div></div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button
                 type="button"
@@ -999,7 +1001,7 @@ export default function ClientFiles({ client, documents, onClose }) {
               <div style={{ width: 74, height: 92, margin: "0 auto 18px", background: "#F6F3EA", border: "2px dashed #C9C4B6", display: "flex", alignItems: "center", justifyContent: "center", color: "#B0AA9A" }}>
                 <Upload size={26} />
               </div>
-              <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 18, fontWeight: 700 }}>No documents uploaded yet</div>
+              <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 18, fontWeight: 700 }}>No documents uploaded yet</div>
               <div style={{ fontSize: 13, color: "#6B6656", margin: "6px 0 18px" }}>Upload a PDF, scan or photo and it will appear here, ready to preview.</div>
               <button type="button" onClick={() => setUploadOpen(true)} style={{ background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "11px 24px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
                 Upload the first file

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import BackButton from "./Back.jsx";
 import { X, Download, Search } from "lucide-react";
 import { Spinner } from "./Loading.jsx";
 import { Pager, usePaging } from "./Pager.jsx";
@@ -412,7 +413,7 @@ function ExistingForms({ client, user, items, reload, setNotice, setError }) {
     <div style={{ marginBottom: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <div>
-          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>Existing forms on file <InfoTip align="left" text="Already filled in and signed? Upload the scan or PDF and it is stored here as it is." /></div>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700 }}>Existing forms on file <InfoTip align="left" text="Already filled in and signed? Upload the scan or PDF and it is stored here as it is." /></div>
         </div>
         <button type="button" onClick={() => setOpen((o) => !o)} style={{ border: `1px solid ${BRAND_GREEN_DEEP}`, background: open ? BRAND_GREEN_DEEP : "#fff", color: open ? "#EDEAE2" : BRAND_GREEN_DEEP, padding: "9px 16px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
           {open ? "Cancel" : "Upload filled forms"}
@@ -544,7 +545,7 @@ function FileChecklist({ client, lists, setNotice, setError, onSaved }) {
 
   return (
     <div style={{ marginBottom: 22 }}>
-      <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>Paperwork on file <InfoTip align="left" text="For each item, say whether the paper copy is on file and where it is kept. Forms filled in this app also count." /></div>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700 }}>Paperwork on file <InfoTip align="left" text="For each item, say whether the paper copy is on file and where it is kept. Forms filled in this app also count." /></div>
       <div style={{ height: 8 }} />
       {items === null && <div style={{ color: "#8A8577", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}><Spinner size={16} /> Loading…</div>}
       {items &&
@@ -625,12 +626,13 @@ export function ClientOnboarding({ client, user, onClose, onChanged }) {
     <div style={{ position: "fixed", inset: 0, zIndex: 52, background: "rgba(28,36,48,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ width: 820, maxWidth: "100%", maxHeight: "92vh", background: "#FBFAF6", padding: 24, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={onClose} />
           <div>
-            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 19, fontWeight: 700 }}>Client file</div>
+            <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 19, fontWeight: 700 }}>Client file</div>
             <div style={{ fontSize: 12, color: "#8A8577", marginTop: 3 }}>
               {client.company} <span style={{ fontFamily: "monospace" }}>({client.fileNo})</span>
             </div>
-          </div>
+          </div></div>
           <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }} aria-label="Close">
             <X size={18} />
           </button>
@@ -648,7 +650,7 @@ export function ClientOnboarding({ client, user, onClose, onChanged }) {
             <div key={kind} style={{ marginBottom: 22 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                 <div>
-                  <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700 }}>{K.title}</div>
+                  <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700 }}>{K.title}</div>
                   <div style={{ fontSize: 12, color: "#8A8577" }}>{K.blurb}</div>
                 </div>
                 <button type="button" onClick={() => setForm(kind)} style={{ background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "9px 16px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
@@ -786,7 +788,7 @@ export function OnboardingHub({ clients, user, onChanged }) {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700 }}>Compliance <InfoTip align="left" text="Shows which clients have their KYC and PEP paperwork on file, on paper or in this app, and where it is kept. Missing paperwork and paper copies over 2 years old are flagged. Tick several clients to mark them as on file in one go." /></div>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 20, fontWeight: 700 }}>Compliance <InfoTip align="left" text="Shows which clients have their KYC and PEP paperwork on file, on paper or in this app, and where it is kept. Missing paperwork and paper copies over 2 years old are flagged. Tick several clients to mark them as on file in one go." /></div>
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>

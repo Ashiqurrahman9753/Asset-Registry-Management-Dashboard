@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import BackButton from "./Back.jsx";
 import { X, Download, CheckCircle2, AlertCircle, AlertTriangle, ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 import { BRAND_GREEN, BRAND_GREEN_DEEP, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
@@ -665,7 +666,7 @@ export default function FilingHelper({ client, user, documents, ar, revealed, on
     padding: 24,
   };
   const card = { width: step === "filing" ? 980 : 520, maxWidth: "100%", maxHeight: "92vh", background: "#FBFAF6", padding: 24, overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" };
-  const titleStyle = { fontFamily: "'Fraunces', Georgia, serif", fontSize: 19, fontWeight: 700 };
+  const titleStyle = { fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 19, fontWeight: 700 };
 
   const errorBox = error && (
     <div style={{ background: "#F5E1E1", color: "#7A2C2E", padding: "8px 12px", fontSize: 12, fontWeight: 600, margin: "12px 0" }}>{error}</div>
@@ -1020,12 +1021,13 @@ export default function FilingHelper({ client, user, documents, ar, revealed, on
     <div style={overlay}>
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={onClose} />
           <div>
             <div style={titleStyle}>Prepare filing</div>
             <div style={{ fontSize: 12, color: "#8A8577", marginTop: 3 }}>
               {client.company} <span style={{ fontFamily: "monospace" }}>({client.fileNo})</span>
             </div>
-          </div>
+          </div></div>
           <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }} aria-label="Close">
             <X size={18} />
           </button>

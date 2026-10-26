@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import BackButton from "./Back.jsx";
 import { X, CalendarClock, CheckCircle2, AlertTriangle, ArrowRight, Search } from "lucide-react";
 import { BRAND_GREEN_DEEP, glassPanel } from "./theme.jsx";
 import { createSchedule, updateSchedule } from "./api.js";
@@ -84,7 +85,7 @@ export function ComplianceTiles({ clients, schedules, onChanged, onOpenClient })
                       <CalendarClock size={17} />
                     </span>
                     <div>
-                      <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 16, fontWeight: 700, color: "#1C2430" }}>{task.label} filings</div>
+                      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700, color: "#1C2430" }}>{task.label} filings</div>
                       <div style={{ fontSize: 11.5, color: "#8A8577" }}>
                         {nextDue ? `${nextDue.view.period} · due ${shortDate(nextDue.view.due)}` : items.length ? "All filed for this cycle" : task.blurb}
                       </div>
@@ -340,9 +341,10 @@ export function ComplianceModal({ task, clients, schedules, startInSetup, onClos
         {/* Header */}
         <div style={{ padding: "20px 24px 14px", borderBottom: "1px solid #E5E1D5" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}><BackButton onClick={onClose} />
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 21, fontWeight: 700 }}>{task.label} filings</div>
+                <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 21, fontWeight: 700 }}>{task.label} filings</div>
                 {st.urgent > 0 ? (
                   <span style={{ background: "#A63D40", color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, padding: "5px 10px", borderRadius: 999, animation: "fams-pulse 1.8s infinite" }}>ACTION NEEDED · {st.urgent}</span>
                 ) : (
@@ -352,7 +354,7 @@ export function ComplianceModal({ task, clients, schedules, startInSetup, onClos
               <div style={{ fontSize: 12.5, color: "#6B6656", marginTop: 4 }}>
                 {st.done} of {st.total} filed this cycle · {st.overdue} overdue · {st.dueSoon} due within {ACTION_DAYS} days · {st.upcoming} upcoming
               </div>
-            </div>
+            </div></div>
             <button type="button" onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", flexShrink: 0 }} aria-label="Close">
               <X size={20} />
             </button>

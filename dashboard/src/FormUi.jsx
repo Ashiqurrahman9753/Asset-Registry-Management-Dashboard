@@ -43,7 +43,7 @@ export function sectionHeading(n, title) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
       <span style={{ background: BRAND_GREEN_DEEP, color: "#EDEAE2", width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 15 }}>{n}</span>
-      <span style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 20, fontWeight: 700 }}>{title}</span>
+      <span style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 20, fontWeight: 700 }}>{title}</span>
     </div>
   );
 }
