@@ -29,7 +29,7 @@ async function logFileAccess({ dbRun }, file, staff, action) {
     await dbRun("INSERT INTO file_access_log (file_id, filename, action, staff) VALUES ($1, $2, $3, $4)", [
       file.id,
       file.filename,
-      action === "download" ? "downloaded" : "viewed",
+      action === "download" ? "downloaded" : action === "delete" ? "deleted" : "viewed",
       staff,
     ]);
   } catch (err) {

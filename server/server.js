@@ -16,6 +16,7 @@ const path = require("path");
 const { CATEGORY_INFO, sendRawTSPL, buildDocumentLabelTSPL, buildBoxLabelTSPL, buildClientFolderLabelTSPL, setConfig: setPrinterConfig, getConfig: getPrinterConfig, listPrinters, resolvePrinter } = require("./print.js");
 const multer = require("multer");
 const storage = require("./storage.js");
+const security = require("./security.js");
 
 // The Filing Helper is loaded defensively — if anything about it is broken, the
 // register itself (clients, documents, scanning, labels) must still start and work.
@@ -61,9 +62,13 @@ const ALLOWED_FILE_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-// In production, set this via an environment variable instead of hardcoding it.
-// Every login token is signed with this — treat it like a password.
-const JWT_SECRET = process.env.FAMS_JWT_SECRET || "change-this-before-real-use";
+// Every login token is signed with this secret, so it must come from the environment (the desktop app
+// creates a random one for each install). There is deliberately no built-in fallback value.
+const JWT_SECRET = process.env.FAMS_JWT_SECRET || "";
+if (JWT_SECRET.length < 32 || JWT_SECRET === "change-this-before-real-use") {
+  console.error("FAMS_JWT_SECRET is missing or too short. Set it to a random value of at least 32 characters.");
+  process.exit(1);
+}
 
 if (!process.env.DATABASE_URL) {
   console.error(
@@ -196,24 +201,69 @@ async function genClientFileNo() {
   return `A${Number(row.n) + 1}`;
 }
 
+// The desktop app talks to this server only from the same computer, so it listens on the loopback
+// address (not on the network), refuses requests addressed to any other host name, and only
+// allows its own pages to call it.
+const PORT = Number(process.env.PORT || 4000);
+const HOST = process.env.FAMS_HOST || "127.0.0.1";
+
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable("x-powered-by");
+app.use(security.hostGuard(PORT));
+app.use(security.securityHeaders);
+app.use(cors(security.corsOptions(PORT)));
+app.use("/api", security.createLimiter({ windowMs: 60 * 1000, max: 1500 }));
+app.use(express.json({ limit: "1mb" }));
+
+// Every id in a URL must be a plain number.
+for (const name of ["id", "fileId", "documentId"]) {
+  app.param(name, (req, res, next, value) => (/^\d{1,9}$/.test(String(value)) ? next() : res.status(400).json({ error: "Invalid id" })));
+}
 
 // ---------- Authentication ----------
 
-app.post("/api/login", async (req, res, next) => {
+const loginLimiter = security.createLimiter({ windowMs: 60 * 1000, max: 30, message: "Too many sign-in attempts. Please wait a minute and try again." });
+const strictLimiter = security.createLimiter({ windowMs: 60 * 1000, max: 10, message: "Too many attempts. Please wait a minute and try again." });
+
+function signToken(user) {
+  return jwt.sign({ sub: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "12h", algorithm: "HS256" });
+}
+
+app.post("/api/login", loginLimiter, async (req, res, next) => {
   try {
-    const { username, password } = req.body;
-    const user = await dbGet("SELECT * FROM users WHERE username = $1", [username || ""]);
-    const ok = user && bcrypt.compareSync(password || "", user.password_hash);
+    const body = req.body || {};
+    const username = security.cleanText(body.username, 100);
+    const password = body.password;
+    if (!username || typeof password !== "string" || !password || password.length > 200) {
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
 
-    await dbRun("INSERT INTO login_log (username, success) VALUES ($1, $2)", [username || "(blank)", ok ? 1 : 0]);
+    const waitMinutes = security.loginLockMinutes(username);
+    if (waitMinutes) {
+      return res.status(429).json({ error: `Too many wrong passwords. Try again in ${waitMinutes} minute${waitMinutes === 1 ? "" : "s"}.` });
+    }
 
-    if (!ok) return res.status(401).json({ error: "Invalid username or password" });
+    const user = await dbGet("SELECT * FROM users WHERE username = $1", [username]);
+    // Always run a password check, even for an unknown name, so the reply time does not reveal which names exist.
+    const passwordOk = bcrypt.compareSync(password, user ? user.password_hash : security.DUMMY_HASH);
+    const ok = !!user && passwordOk;
 
-    const token = jwt.sign({ sub: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "12h" });
-    res.json({ token, username: user.username, role: user.role });
+    await dbRun("INSERT INTO login_log (username, success) VALUES ($1, $2)", [username.slice(0, 100), ok ? 1 : 0]);
+
+    if (!ok) {
+      security.recordLoginFailure(username);
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+    security.clearLoginFailures(username);
+
+    // Passwords saved with an older, weaker setting are re-saved with the current one.
+    if (security.needsRehash(user.password_hash)) {
+      await dbRun("UPDATE users SET password_hash = $1 WHERE id = $2", [security.hashPassword(password), user.id]).catch((err) =>
+        console.error("Could not upgrade a password hash:", err.message)
+      );
+    }
+
+    res.json({ token: signToken(user), username: user.username, role: user.role });
   } catch (err) {
     next(err);
   }
@@ -232,23 +282,30 @@ app.get("/api/setup-status", async (req, res, next) => {
   }
 });
 
-app.post("/api/setup", async (req, res, next) => {
+// Usernames are short, plain names: letters, numbers and . _ - @ only.
+function usernameProblem(name) {
+  if (typeof name !== "string" || !/^[A-Za-z0-9._@-]{3,40}$/.test(name)) {
+    return "Username must be 3 to 40 characters: letters, numbers and . _ - @ only.";
+  }
+  return "";
+}
+
+app.post("/api/setup", strictLimiter, async (req, res, next) => {
   try {
     const row = await dbGet("SELECT COUNT(*) AS n FROM users");
     if (Number(row.n) > 0) {
       return res.status(403).json({ error: "This install already has an account — use the login screen." });
     }
-    const { username, password } = req.body;
-    if (!username || !String(username).trim() || !password || String(password).length < 8) {
-      return res.status(400).json({ error: "Username and an 8+ character password are required" });
-    }
-    const hash = bcrypt.hashSync(password, 10);
+    const body = req.body || {};
+    const username = security.cleanText(body.username, 40);
+    const password = body.password;
+    const problem = usernameProblem(username) || security.passwordProblem(password, username);
+    if (problem) return res.status(400).json({ error: problem });
     const user = await dbGet(
       "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin') RETURNING *",
-      [String(username).trim(), hash]
+      [username, security.hashPassword(password)]
     );
-    const token = jwt.sign({ sub: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: "12h" });
-    res.status(201).json({ token, username: user.username, role: user.role });
+    res.status(201).json({ token: signToken(user), username: user.username, role: user.role });
   } catch (err) {
     next(err);
   }
@@ -259,7 +316,7 @@ function requireAuth(req, res, next) {
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: "Not logged in" });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    req.user = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
     next();
   } catch {
     res.status(401).json({ error: "Session expired — please log in again" });
@@ -286,10 +343,12 @@ app.get("/api/users", requireAdmin, async (req, res, next) => {
 
 app.post("/api/users", requireAdmin, async (req, res, next) => {
   try {
-    const { username, password, role } = req.body;
-    if (!username || !password) return res.status(400).json({ error: "username and password are required" });
-    const hash = bcrypt.hashSync(password, 10);
-    const finalRole = role === "admin" ? "admin" : "staff";
+    const body = req.body || {};
+    const username = security.cleanText(body.username, 40);
+    const problem = usernameProblem(username) || security.passwordProblem(body.password, username);
+    if (problem) return res.status(400).json({ error: problem });
+    const hash = security.hashPassword(body.password);
+    const finalRole = body.role === "admin" ? "admin" : "staff";
     try {
       const created = await dbGet(
         "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role",
@@ -307,17 +366,19 @@ app.post("/api/users", requireAdmin, async (req, res, next) => {
 // Self-service — any logged-in user can change their OWN password (not
 // gated admin-only like creating new logins above). Requires the current
 // password, same as changing a password on any normal account.
-app.patch("/api/users/me/password", async (req, res, next) => {
+app.patch("/api/users/me/password", strictLimiter, async (req, res, next) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword || newPassword.length < 8) {
-      return res.status(400).json({ error: "Current password and a new password (8+ characters) are required" });
+    const { currentPassword, newPassword } = req.body || {};
+    if (typeof currentPassword !== "string" || !currentPassword || currentPassword.length > 200 || typeof newPassword !== "string") {
+      return res.status(400).json({ error: "Current password and a new password are required" });
     }
     const user = await dbGet("SELECT * FROM users WHERE id = $1", [req.user.sub]);
     if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) {
       return res.status(401).json({ error: "Current password is incorrect" });
     }
-    const hash = bcrypt.hashSync(newPassword, 10);
+    const problem = security.passwordProblem(newPassword, user.username);
+    if (problem) return res.status(400).json({ error: problem });
+    const hash = security.hashPassword(newPassword);
     await dbRun("UPDATE users SET password_hash = $1 WHERE id = $2", [hash, user.id]);
     res.json({ ok: true });
   } catch (err) {
@@ -363,6 +424,29 @@ app.get("/api/login-log", requireAdmin, async (req, res, next) => {
 
 // ---------- Clients ----------
 
+const CLIENT_STATUSES = ["A", "D", "ADHOC", "SO", "NR", "L"];
+const CLIENT_TEXT_LIMITS = {
+  company: 200, roc: 40, yearEnd: 40, dateInc: 40, registeredAddress: 500, directors: 2000,
+  contact: 200, contactPhone: 50, contactEmail: 200, fax: 50, gstRegNo: 40, status: 10,
+};
+
+// Cleans the client fields named in `keys` that are present in `body`: text only, control characters
+// removed, length capped, empty text saved as nothing. Returns { values } or { error }.
+function cleanClientBody(body, keys) {
+  const values = {};
+  for (const key of keys) {
+    if (!(key in body)) continue;
+    const multiline = key === "directors" || key === "registeredAddress";
+    const v = security.cleanText(body[key], CLIENT_TEXT_LIMITS[key] || 200, { multiline });
+    if (v === null) return { error: `${key} must be text` };
+    if (key === "contactEmail" && v && !security.isEmail(v)) return { error: "The email address does not look right." };
+    if (key === "status" && v && !CLIENT_STATUSES.includes(v)) return { error: "Unknown client status." };
+    values[key] = v === "" ? null : v;
+  }
+  if ("status" in values && values.status === null) values.status = "A";
+  return { values };
+}
+
 app.get("/api/clients", async (req, res, next) => {
   try {
     res.json(await dbAll("SELECT * FROM clients ORDER BY company ASC"));
@@ -373,8 +457,14 @@ app.get("/api/clients", async (req, res, next) => {
 
 app.post("/api/clients", async (req, res, next) => {
   try {
-    const { fileNo: explicitFileNo, company, roc, yearEnd, dateInc, registeredAddress, directors, contact, contactPhone, contactEmail, fax, status } = req.body;
+    const cleaned = cleanClientBody(req.body || {}, ["company", "roc", "yearEnd", "dateInc", "registeredAddress", "directors", "contact", "contactPhone", "contactEmail", "fax", "status"]);
+    if (cleaned.error) return res.status(400).json({ error: cleaned.error });
+    const { company, roc, yearEnd, dateInc, registeredAddress, directors, contact, contactPhone, contactEmail, fax, status } = cleaned.values;
     if (!company) return res.status(400).json({ error: "company is required" });
+    const explicitFileNo = security.cleanText((req.body || {}).fileNo, 30);
+    if (explicitFileNo === null || (explicitFileNo && !/^[A-Za-z0-9._\/ -]{1,30}$/.test(explicitFileNo))) {
+      return res.status(400).json({ error: "File number may only contain letters, numbers and . _ / -" });
+    }
     try {
       // Normally the system assigns the next file number, but a bulk import
       // of pre-existing clients needs to keep whatever's already written on
@@ -402,7 +492,10 @@ app.post("/api/clients", async (req, res, next) => {
       );
       res.status(201).json(created);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      // 23505 = a unique value (file number or ROC) is already in use.
+      if (err && err.code === "23505") return res.status(400).json({ error: "A client with that file number or ROC already exists." });
+      if (err && (err.code === "23514" || err.code === "22001" || err.code === "22P02")) return res.status(400).json({ error: "Some of the details are not valid." });
+      throw err;
     }
   } catch (err) {
     next(err);
@@ -436,11 +529,15 @@ app.patch("/api/clients/:id", requireAdmin, async (req, res, next) => {
     const client = await dbGet("SELECT * FROM clients WHERE id = $1", [req.params.id]);
     if (!client) return res.status(404).json({ error: "Client not found" });
 
+    const cleaned = cleanClientBody(req.body || {}, Object.keys(CLIENT_EDITABLE_FIELDS));
+    if (cleaned.error) return res.status(400).json({ error: cleaned.error });
+    if ("company" in cleaned.values && !cleaned.values.company) return res.status(400).json({ error: "company is required" });
+
     const updates = [];
     const logEntries = [];
     for (const [bodyKey, column] of Object.entries(CLIENT_EDITABLE_FIELDS)) {
-      if (!(bodyKey in req.body)) continue;
-      const newValue = req.body[bodyKey] === "" ? null : req.body[bodyKey];
+      if (!(bodyKey in cleaned.values)) continue;
+      const newValue = cleaned.values[bodyKey];
       const oldValue = client[column];
       if (newValue === oldValue) continue;
       updates.push({ column, value: newValue });
@@ -493,9 +590,20 @@ app.patch("/api/clients/:id/report-fields", async (req, res, next) => {
     const sets = [];
     const params = [];
     const logEntries = [];
+    const REPORT_LIMITS = { acraStatus: 120, taxNotes: 2000, pendingWork: 2000 };
     for (const [bodyKey, column] of Object.entries(REPORT_FIELDS)) {
       if (req.body[bodyKey] === undefined) continue;
-      const newValue = req.body[bodyKey];
+      let newValue = req.body[bodyKey];
+      if (bodyKey === "annualRevenue") {
+        if (newValue === null || newValue === "") newValue = null;
+        else {
+          newValue = Number(newValue);
+          if (!Number.isFinite(newValue) || newValue < 0 || newValue > 1e12) return res.status(400).json({ error: "Annual revenue must be a positive number." });
+        }
+      } else {
+        newValue = security.cleanText(newValue, REPORT_LIMITS[bodyKey], { multiline: bodyKey !== "acraStatus" });
+        if (newValue === null) return res.status(400).json({ error: `${bodyKey} must be text` });
+      }
       const oldValue = client[column];
       if (String(newValue ?? "") === String(oldValue ?? "")) continue;
       params.push(newValue);
@@ -557,7 +665,7 @@ app.get("/api/printer-settings", async (req, res, next) => {
   }
 });
 
-app.put("/api/printer-settings", async (req, res, next) => {
+app.put("/api/printer-settings", requireAdmin, async (req, res, next) => {
   try {
     await applyPrinterSettings();
     const cfg = setPrinterConfig(req.body || {});
@@ -655,8 +763,9 @@ app.post("/api/clients/:id/schedules", async (req, res, next) => {
   try {
     const client = await dbGet("SELECT id FROM clients WHERE id = $1", [req.params.id]);
     if (!client) return res.status(404).json({ error: "Client not found" });
-    const { taskName, frequency, dueDay, dueMonth, lastCompletedDate } = req.body;
-    if (lastCompletedDate && !/^\d{4}-\d{2}-\d{2}$/.test(String(lastCompletedDate))) {
+    const { frequency, dueDay, dueMonth, lastCompletedDate } = req.body || {};
+    const taskName = security.cleanText((req.body || {}).taskName, 100);
+    if (lastCompletedDate && !security.isIsoDate(lastCompletedDate)) {
       return res.status(400).json({ error: "lastCompletedDate must be YYYY-MM-DD" });
     }
     if (!taskName || !frequency || !dueDay) {
@@ -664,6 +773,12 @@ app.post("/api/clients/:id/schedules", async (req, res, next) => {
     }
     if (!["monthly", "quarterly", "yearly"].includes(frequency)) {
       return res.status(400).json({ error: "frequency must be monthly, quarterly, or yearly" });
+    }
+    if (!Number.isInteger(Number(dueDay)) || Number(dueDay) < 1 || Number(dueDay) > 31) {
+      return res.status(400).json({ error: "dueDay must be a day of the month (1 to 31)" });
+    }
+    if (dueMonth && (!Number.isInteger(Number(dueMonth)) || Number(dueMonth) < 1 || Number(dueMonth) > 12)) {
+      return res.status(400).json({ error: "dueMonth must be a month (1 to 12)" });
     }
     if (frequency !== "monthly" && !dueMonth) {
       return res.status(400).json({ error: "dueMonth is required for quarterly/yearly schedules" });
@@ -683,7 +798,13 @@ app.patch("/api/schedules/:id", async (req, res, next) => {
   try {
     const schedule = await dbGet("SELECT * FROM client_schedules WHERE id = $1", [req.params.id]);
     if (!schedule) return res.status(404).json({ error: "Schedule not found" });
-    const { taskName, frequency, dueDay, dueMonth, lastCompletedDate } = req.body;
+    const { frequency, dueDay, dueMonth, lastCompletedDate } = req.body || {};
+    const taskName = (req.body || {}).taskName === undefined ? undefined : security.cleanText(req.body.taskName, 100);
+    if (taskName === null || taskName === "") return res.status(400).json({ error: "taskName must be text" });
+    if (frequency !== undefined && !["monthly", "quarterly", "yearly"].includes(frequency)) return res.status(400).json({ error: "frequency must be monthly, quarterly, or yearly" });
+    if (dueDay && (!Number.isInteger(Number(dueDay)) || Number(dueDay) < 1 || Number(dueDay) > 31)) return res.status(400).json({ error: "dueDay must be a day of the month (1 to 31)" });
+    if (dueMonth && (!Number.isInteger(Number(dueMonth)) || Number(dueMonth) < 1 || Number(dueMonth) > 12)) return res.status(400).json({ error: "dueMonth must be a month (1 to 12)" });
+    if (lastCompletedDate && !security.isIsoDate(lastCompletedDate)) return res.status(400).json({ error: "lastCompletedDate must be YYYY-MM-DD" });
     const updated = await dbGet(
       `UPDATE client_schedules SET
         task_name = $1, frequency = $2, due_day = $3, due_month = $4, last_completed_date = $5
@@ -787,9 +908,19 @@ app.get("/api/documents/lookup/:code", async (req, res, next) => {
 
 app.post("/api/documents", async (req, res, next) => {
   try {
-    const { clientId, category, serviceDetail, location, dateReceived, loggedBy, isAgmFiling, isBatch, batchCount } = req.body;
+    const { clientId, category, isAgmFiling, isBatch, batchCount } = req.body || {};
+    const serviceDetail = security.cleanText((req.body || {}).serviceDetail, 300);
+    const location = security.cleanText((req.body || {}).location, 200);
+    const loggedBy = security.cleanText((req.body || {}).loggedBy, 80);
+    const dateReceived = (req.body || {}).dateReceived;
     if (!clientId || !category || !location || !dateReceived || !loggedBy) {
       return res.status(400).json({ error: "clientId, category, location, dateReceived, loggedBy are required" });
+    }
+    if (serviceDetail === null || !Number.isInteger(Number(clientId)) || !CATEGORY_CODE[category] || !security.isIsoDate(dateReceived)) {
+      return res.status(400).json({ error: "Some of the document details are not valid." });
+    }
+    if (isBatch && batchCount && (!Number.isInteger(Number(batchCount)) || Number(batchCount) < 1 || Number(batchCount) > 100000)) {
+      return res.status(400).json({ error: "batchCount must be a whole number" });
     }
     // A "batch" entry represents a whole box/bag a client dropped off — one
     // register entry and one label for the box itself, not one per page, since
@@ -832,9 +963,22 @@ app.post("/api/documents", async (req, res, next) => {
 // creates one document row per ticked item, all sharing the same box,
 // location, date, and logged-by, each still getting its own unique code.
 app.post("/api/documents/batch-intake", async (req, res, next) => {
-  const { clientId, location, dateReceived, loggedBy, batchCount, items, isAgmFiling } = req.body;
+  const { clientId, dateReceived, batchCount, isAgmFiling } = req.body || {};
+  const location = security.cleanText((req.body || {}).location, 200);
+  const loggedBy = security.cleanText((req.body || {}).loggedBy, 80);
+  let items = (req.body || {}).items;
   if (!clientId || !location || !dateReceived || !loggedBy || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "clientId, location, dateReceived, loggedBy, and at least one checked item are required" });
+  }
+  if (items.length > 50 || !Number.isInteger(Number(clientId)) || !security.isIsoDate(dateReceived)) {
+    return res.status(400).json({ error: "Some of the document details are not valid." });
+  }
+  if (batchCount && (!Number.isInteger(Number(batchCount)) || Number(batchCount) < 1 || Number(batchCount) > 100000)) {
+    return res.status(400).json({ error: "batchCount must be a whole number" });
+  }
+  items = items.map((it) => ({ category: it && it.category, serviceDetail: security.cleanText(it && it.serviceDetail, 300) }));
+  if (items.some((it) => !CATEGORY_CODE[it.category] || it.serviceDetail === null)) {
+    return res.status(400).json({ error: "Some of the document details are not valid." });
   }
 
   // One transaction for the whole box: if any item fails partway through
@@ -954,6 +1098,10 @@ app.post("/api/documents/:id/files", upload.single("file"), async (req, res, nex
     if (!ALLOWED_FILE_TYPES.has(req.file.mimetype)) {
       return res.status(400).json({ error: "Unsupported file type — PDF, Word, Excel, or an image is expected" });
     }
+    if (!security.contentMatchesType(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: "The file does not look like the type it claims to be. Please check the file." });
+    }
+    const safeName = security.cleanText(String(req.file.originalname || "file").replace(/[\\\/]/g, "_"), 200) || "file";
 
     const storageKey = storage.makeStorageKey(req.file.originalname);
     await storage.saveFile(req.file.buffer, storageKey);
@@ -962,7 +1110,7 @@ app.post("/api/documents/:id/files", upload.single("file"), async (req, res, nex
       `INSERT INTO document_files (document_id, filename, storage_key, mime_type, size_bytes, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, document_id, filename, mime_type, size_bytes, uploaded_by, uploaded_at`,
-      [doc.id, req.file.originalname, storageKey, req.file.mimetype, req.file.size, req.user.username]
+      [doc.id, safeName, storageKey, req.file.mimetype, req.file.size, req.user.username]
     );
     res.status(201).json(created);
   } catch (err) {
@@ -978,6 +1126,9 @@ app.get("/api/files/:fileId/download", async (req, res, next) => {
     if (vault) await vault.logFileAccess({ dbRun }, file, req.user.username, req.query.action);
     res.setHeader("Content-Type", file.mime_type || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.filename)}"`);
+    // An uploaded file can never run code or be framed as a page.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
     res.send(buffer);
   } catch (err) {
     next(err);
@@ -990,6 +1141,7 @@ app.delete("/api/files/:fileId", async (req, res, next) => {
     if (!file) return res.status(404).json({ error: "File not found" });
     await dbRun("DELETE FROM document_files WHERE id = $1", [file.id]);
     await storage.deleteFile(file.storage_key);
+    if (vault) await vault.logFileAccess({ dbRun }, file, req.user.username, "delete");
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -1054,22 +1206,24 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 // process, one port, no CORS. Cloud/dev deployments never set this.
 if (process.env.SERVE_DASHBOARD) {
   const dashboardDist = path.join(__dirname, process.env.SERVE_DASHBOARD);
-  app.use(express.static(dashboardDist));
+  app.use(express.static(dashboardDist, { dotfiles: "deny" }));
   app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(dashboardDist, "index.html")));
 }
 
 // Centralized error handler — keeps route handlers from needing their own
 // try/catch boilerplate for anything except the specific errors they handle.
 app.use((err, req, res, next) => {
+  // Bad requests (broken JSON, too big, wrong upload) get a clear message; nothing internal is ever sent back.
+  if (err && err.type === "entity.parse.failed") return res.status(400).json({ error: "The request could not be read." });
+  if (err && err.type === "entity.too.large") return res.status(413).json({ error: "That request is too large." });
+  if (err && err.name === "MulterError") return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "That file is too large (20 MB at most)." : "The upload could not be read." });
   console.error(err);
   res.status(500).json({ error: "Something went wrong. Please try again." });
 });
 
-const PORT = process.env.PORT || 4000;
-
 initSchema()
   .then(() => {
-    app.listen(PORT, () => console.log(`FAMS backend running on http://localhost:${PORT}`));
+    app.listen(PORT, HOST, () => console.log(`FAMS backend running on http://localhost:${PORT}`));
   })
   .catch((err) => {
     console.error("Failed to initialize database schema:", err);

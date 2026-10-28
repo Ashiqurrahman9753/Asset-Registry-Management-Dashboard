@@ -25,7 +25,7 @@ Two environment variables matter:
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string |
 | `PGSSL` | only for managed providers | Set to `true` for Neon/Supabase/RDS/etc. — they require TLS. Leave unset for a local dev Postgres. |
-| `FAMS_JWT_SECRET` | for production | Signs login tokens. Falls back to a well-known dev value locally — **must** be set to a real random secret before this is reachable from the internet. |
+| `FAMS_JWT_SECRET` | **yes** | Signs login tokens. The server refuses to start without a random value of at least 32 characters (the desktop app creates one per install). There is no built-in default. |
 
 ## Create your first login
 
@@ -37,7 +37,7 @@ not through a form anyone on the internet could reach.
 DATABASE_URL="..." node create-admin.js
 ```
 
-Follow the prompts (username + password, 8 characters minimum). Once
+Follow the prompts (username + password, 8 to 72 characters, not too easy to guess). Once
 created, log in via:
 
 ```bash
@@ -146,3 +146,10 @@ drive or a personal cloud-sync folder (Google Drive/OneDrive).
 | GET | `/api/users` | admin only | List staff logins |
 | POST | `/api/users` | admin only | Create a new staff login |
 | GET | `/api/login-log` | admin only | Recent login attempts, success and failure |
+
+## Security notes
+
+- The server listens on 127.0.0.1 only (override with FAMS_HOST) and refuses requests whose Host or Origin is not the app's own.
+- Sign-in is limited: 5 wrong passwords lock that username for 15 minutes; passwords are stored with bcrypt (cost 12) and upgraded at the next sign-in.
+- Uploaded files are checked against their claimed type, served with `nosniff` and a locked-down policy.
+- Never commit `DATABASE_URL`, `FAMS_JWT_SECRET` or any data file to git.

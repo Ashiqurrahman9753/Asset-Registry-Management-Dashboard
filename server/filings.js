@@ -286,7 +286,7 @@ function registerFilingRoutes(app, { dbGet, dbAll, dbRun, pool, requireAdmin, st
       }
       if (dueDate && !isIsoDate(dueDate)) return res.status(400).json({ error: "dueDate must be YYYY-MM-DD" });
 
-      const label = String(periodLabel).trim();
+      const label = String(periodLabel).replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 100);
       const existing = await dbGet(
         "SELECT id FROM filings WHERE client_id = $1 AND filing_type = $2 AND period_label = $3",
         [client.id, filingType, label]
