@@ -14,6 +14,7 @@ import ScanCompliance from "./ScanFile.jsx";
 import BackButton from "./Back.jsx";
 import InfoTip from "./InfoTip.jsx";
 import { NavDropdown, ProfileModal } from "./Header.jsx";
+import PrinterSettingsModal from "./Printer.jsx";
 import { OnboardingHub, ClientOnboarding } from "./Onboard.jsx";
 import { Wallpaper, glassPanel, glassDark, LOGO_URL, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_BRIGHT, HIGHLIGHT_BG, HIGHLIGHT_TEXT } from "./theme.jsx";
 import {
@@ -215,32 +216,27 @@ function Label({ entry }) {
   );
 }
 
-function ClientLabel({ client }) {
+function ClientLabel({ client, boxNote }) {
   return (
-    <div style={{ width: 300, border: "1px solid #C9C4B6", background: "#FBFAF6", display: "flex", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
-      <div style={{ width: 10, background: "#1C2430" }} />
-      <div style={{ padding: "12px 14px", flex: 1 }}>
-        <div style={{ fontSize: 10, letterSpacing: 1, color: "#8A8577", marginBottom: 4, fontFamily: "'Public Sans', sans-serif" }}>
-          Client Master File · Financial Asset Register
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#1C2430", marginBottom: 2 }}>{client.company}</div>
-        {client.roc && <div style={{ fontSize: 12, color: "#4A4638", marginBottom: 8 }}>ROC {client.roc}</div>}
+    <div style={{ width: 330, border: "1px solid #C9C4B6", background: "#fff", fontFamily: "'Public Sans', system-ui, sans-serif", padding: "10px 14px" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#1C2430", lineHeight: 1.25 }}>{client.company}</div>
+      <div style={{ height: 2, background: "#1C2430", margin: "7px 0 9px" }} />
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
         <div
-          style={{
-            fontFamily: "monospace",
-            fontSize: 13,
-            letterSpacing: 2,
-            background: "repeating-linear-gradient(90deg, #1C2430 0 2px, transparent 2px 4px)",
-            height: 26,
-            marginBottom: 6,
-          }}
+          title="A scannable QR code is printed here"
+          style={{ width: 84, height: 84, flexShrink: 0, background: "repeating-conic-gradient(#1C2430 0% 25%, #fff 0% 50%) 0 0 / 14px 14px", border: "5px solid #1C2430", boxSizing: "border-box" }}
         />
-        <div style={{ fontFamily: "monospace", fontSize: 11, color: "#1C2430" }}>{client.fileNo}</div>
+        <div>
+          <div style={{ fontSize: 9, letterSpacing: 1, color: "#6B6656" }}>FILE NO.</div>
+          <div style={{ fontSize: 30, fontWeight: 700, color: "#1C2430", lineHeight: 1.05 }}>{client.fileNo}</div>
+          {boxNote ? <div style={{ fontSize: 14, fontWeight: 700, color: "#1C2430", marginTop: 8 }}>{boxNote}</div> : null}
+        </div>
       </div>
+      <div style={{ height: 2, background: "#1C2430", margin: "9px 0 5px" }} />
+      <div style={{ fontSize: 11, color: "#4A4638" }}>{client.roc ? `ROC ${client.roc}` : "JARDEEN MANAGEMENT"}</div>
     </div>
   );
 }
-
 function BoxLabel({ entry }) {
   return (
     <div style={{ width: 300, border: "2px solid #1C2430", background: "#FBFAF6", fontFamily: "'Public Sans', system-ui, sans-serif" }}>
@@ -345,6 +341,7 @@ function Dashboard({ user, onLogout }) {
   const [showForm, setShowForm] = useState(false);
   const [printPreview, setPrintPreview] = useState(null);
   const [clientLabelPreview, setClientLabelPreview] = useState(null);
+  const [boxNote, setBoxNote] = useState("");
   const [printBusy, setPrintBusy] = useState(false);
   const [printStatus, setPrintStatus] = useState(null); // { ok: bool, message: string }
   const [loading, setLoading] = useState(true);
@@ -388,6 +385,7 @@ function Dashboard({ user, onLogout }) {
 
   useEffect(() => () => clearTimeout(postOnboardTimer.current), []);
   useEffect(() => { setPrintStatus(null); }, [printPreview, clientLabelPreview]);
+  useEffect(() => { setBoxNote(""); }, [clientLabelPreview]);
 
   function resetEntryWizard() {
     clearTimeout(postOnboardTimer.current);
@@ -893,7 +891,7 @@ function Dashboard({ user, onLogout }) {
     setPrintStatus(null);
     try {
       if (kind === "document") await printDocumentLabel(printPreview.id);
-      else await printClientFolderLabel(clientLabelPreview.id);
+      else await printClientFolderLabel(clientLabelPreview.id, boxNote);
       setPrintStatus({ ok: true, message: "Sent to printer." });
     } catch (err) {
       if (!handleAuthError(err)) setPrintStatus({ ok: false, message: err.message || "Printing failed." });
@@ -2199,7 +2197,11 @@ function Dashboard({ user, onLogout }) {
         >
           <div style={{ background: "#FBFAF6", padding: 24, border: "1px solid #C9C4B6", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
             <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Folder label preview</div>
-            <ClientLabel client={clientLabelPreview} />
+            <ClientLabel client={clientLabelPreview} boxNote={boxNote} />
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#4A4638", marginTop: 14 }}>
+              Box note (optional)
+              <input value={boxNote} onChange={(e) => setBoxNote(e.target.value)} maxLength={32} placeholder="e.g. Box 2 of 3" style={{ border: "1px solid #C9C4B6", background: "#fff", padding: "8px 10px", fontSize: 13 }} />
+            </label>
             {printStatus && (
               <div style={{ marginTop: 12, fontSize: 12.5, fontWeight: 600, color: printStatus.ok ? "#1F4A40" : "#7A2C2E" }}>
                 {printStatus.message}
@@ -2578,6 +2580,7 @@ function UserMenu({ user, onLogout, profileName, onOpenLog, onProfileSaved }) {
   const [open, setOpen] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showPrinter, setShowPrinter] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -2629,6 +2632,15 @@ function UserMenu({ user, onLogout, profileName, onOpenLog, onProfileSaved }) {
           <button
             onClick={() => {
               setOpen(false);
+              setShowPrinter(true);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#1C2430" }}
+          >
+            <Printer size={14} /> Printer settings
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
               setShowChangePassword(true);
             }}
             style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#1C2430" }}
@@ -2648,6 +2660,7 @@ function UserMenu({ user, onLogout, profileName, onOpenLog, onProfileSaved }) {
       )}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
       {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} onSaved={onProfileSaved} />}
+      {showPrinter && <PrinterSettingsModal onClose={() => setShowPrinter(false)} />}
     </div>
   );
 }

@@ -305,8 +305,8 @@ export function printDocumentLabel(documentId) {
   return request(`/api/documents/${documentId}/print`, { method: "POST" });
 }
 
-export function printClientFolderLabel(clientId) {
-  return request(`/api/clients/${clientId}/print-folder-label`, { method: "POST" });
+export function printClientFolderLabel(clientId, boxNote) {
+  return request(`/api/clients/${clientId}/print-folder-label`, { method: "POST", body: JSON.stringify({ boxNote: boxNote || "" }) });
 }
 
 function mapDocumentFile(f) {
@@ -462,6 +462,23 @@ export function verifyKycRecord(id, note) {
 // Printed copy signed by hand, scanned, and uploaded: tells the server which uploaded file is the signed copy.
 export function markKycSigned(id, fileId) {
   return request(`/api/kyc/${id}/signed`, { method: "POST", body: JSON.stringify({ fileId }) });
+}
+
+// Label printer: the printers installed on this computer, the chosen one and the label size.
+export function fetchPrinters() {
+  return request("/api/printers");
+}
+export function fetchPrinterSettings() {
+  return request("/api/printer-settings");
+}
+export function savePrinterSettings(payload) {
+  return request("/api/printer-settings", { method: "PUT", body: JSON.stringify(payload) });
+}
+export function printTestLabel() {
+  return request("/api/printer/test", { method: "POST" });
+}
+export function printFolderLabelsBulk(clientIds, boxNote) {
+  return request("/api/clients/print-folder-labels", { method: "POST", body: JSON.stringify({ clientIds, boxNote: boxNote || "" }) });
 }
 
 // The signed-in user's own name, job title and phone.

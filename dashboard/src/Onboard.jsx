@@ -24,6 +24,7 @@ import {
   fetchFileItems,
   saveFileItem,
   bulkFileItems,
+  printFolderLabelsBulk,
   downloadDocumentFile,
   openDocumentFile,
 } from "./api.js";
@@ -734,6 +735,21 @@ export function OnboardingHub({ clients, user, onChanged }) {
     }
   }
 
+  async function printLabels() {
+    if (!selected.size) return;
+    setBulkBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const out = await printFolderLabelsBulk([...selected]);
+      setNotice(`${out.printed} folder label${out.printed === 1 ? "" : "s"} sent to the label printer.`);
+    } catch (err) {
+      setError(err.message || "Printing failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   async function load() {
     try {
       setRows(await fetchOnboardingSummary());
@@ -836,6 +852,9 @@ export function OnboardingHub({ clients, user, onChanged }) {
           <input type="date" value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} style={{ border: "1px solid #C9C4B6", padding: "7px 9px", fontSize: 12.5 }} title="Date the paper was signed or filed (blank = today)" />
           <button type="button" disabled={bulkBusy} onClick={applyBulk} style={{ background: BRAND_GREEN_DEEP, color: "#EDEAE2", border: "none", padding: "8px 16px", fontWeight: 700, fontSize: 12.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
             {bulkBusy && <Spinner size={13} color="#fff" />} Apply
+          </button>
+          <button type="button" disabled={bulkBusy} onClick={printLabels} style={{ border: `1px solid ${BRAND_GREEN_DEEP}`, background: "#fff", color: BRAND_GREEN_DEEP, padding: "8px 14px", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
+            Print {selected.size} folder label{selected.size === 1 ? "" : "s"}
           </button>
           <button type="button" disabled={bulkBusy} onClick={() => setSelected(new Set())} style={{ ...smallBtn, border: "none", background: "none", color: "#6B6656" }}>Clear</button>
         </div>
