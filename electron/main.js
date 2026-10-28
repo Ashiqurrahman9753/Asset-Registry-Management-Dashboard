@@ -5,7 +5,7 @@
 // itself is untouched — PGlite speaks the real Postgres wire protocol
 // via pglite-socket, so DATABASE_URL just points at localhost instead
 // of the cloud.
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
@@ -163,7 +163,7 @@ function getOrCreateJwtSecret() {
   const secretFile = userDataPath("jwt-secret.txt");
   if (fs.existsSync(secretFile)) return fs.readFileSync(secretFile, "utf8").trim();
   const secret = require("crypto").randomBytes(48).toString("hex");
-  fs.writeFileSync(secretFile, secret, "utf8");
+  fs.writeFileSync(secretFile, secret, { encoding: "utf8", mode: 0o600 });
   return secret;
 }
 
@@ -231,8 +231,9 @@ function prepareWhatsNew() {
 function setupUpdater() {
   prepareWhatsNew();
 
-  ipcMain.handle("updater:get-state", () => updaterState);
-  ipcMain.handle("updater:ack-whats-new", () => {
+  ipcMain.handle("updater:get-state", (event) => (fromAppPage(event) ? updaterState : null));
+  ipcMain.handle("updater:ack-whats-new", (event) => {
+    if (!fromAppPage(event)) return;
     try {
       fs.writeFileSync(userDataPath("last-seen-version.txt"), app.getVersion(), "utf8");
     } catch (err) {
@@ -272,8 +273,9 @@ function setupUpdater() {
   });
 
   const check = () => autoUpdater.checkForUpdates().catch((err) => log("update check failed:", err.message));
-  ipcMain.handle("updater:check", check);
-  ipcMain.handle("updater:download", () => {
+  ipcMain.handle("updater:check", (event) => (fromAppPage(event) ? check() : undefined));
+  ipcMain.handle("updater:download", (event) => {
+    if (!fromAppPage(event)) return;
     setUpdaterState({ status: "downloading", percent: 0, error: null });
     return autoUpdater.downloadUpdate().catch((err) => {
       log("update download failed:", err.message);
@@ -281,7 +283,9 @@ function setupUpdater() {
     });
   });
   // Silent install, and don't relaunch — the user reopens the app and logs in.
-  ipcMain.handle("updater:install", () => autoUpdater.quitAndInstall(true, false));
+  ipcMain.handle("updater:install", (event) => {
+    if (fromAppPage(event)) autoUpdater.quitAndInstall(true, false);
+  });
 
   check();
   setInterval(() => {
@@ -292,16 +296,28 @@ function setupUpdater() {
 // Print a form's page images. The dashboard sends ready-made HTML (page images
 // sized to A4); it's shown in a hidden window just long enough to open the
 // system print dialog, so staff can print to the office printer.
+// Only the app's own page (served from this computer) may use the bridge functions below.
+function fromAppPage(event) {
+  const url = (event && event.senderFrame && event.senderFrame.url) || "";
+  return url === `http://localhost:${SERVER_PORT}` || url.startsWith(`http://localhost:${SERVER_PORT}/`);
+}
+
 function setupPrinting() {
-  ipcMain.handle("print:html", async (_event, html) => {
+  ipcMain.handle("print:html", async (event, html) => {
+    if (!fromAppPage(event)) return { ok: false, reason: "Not allowed" };
     if (typeof html !== "string" || html.length === 0 || html.length > 60 * 1024 * 1024) {
       return { ok: false, reason: "Nothing to print" };
     }
+    // The pages are only ever pictures. Anything that looks like a script is refused.
+    if (/<\s*(script|iframe|object|embed|link|base)\b|javascript:|\son[a-z]+\s*=/i.test(html)) {
+      return { ok: false, reason: "Nothing to print" };
+    }
+    html = html.replace("<head>", "<head><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">");
     const file = path.join(app.getPath("temp"), `fams-print-${Date.now()}.html`);
     let win;
     try {
       fs.writeFileSync(file, html, "utf8");
-      win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false } });
       await win.loadFile(file);
       return await new Promise((resolve) => {
         win.webContents.print({ silent: false, printBackground: true, margins: { marginType: "none" }, pageSize: "A4" }, (success, reason) => resolve({ ok: success, reason }));
@@ -323,7 +339,22 @@ function createWindow() {
     minWidth: 1000,
     minHeight: 650,
     title: "Jardeen Management — Financial Asset Register",
-    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, "preload.js") },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      // No built-in developer tools in the installed app.
+      devTools: !app.isPackaged,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+  // The window can only ever show the app's own pages; any other address opens in the normal browser or is dropped.
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url === `http://localhost:${SERVER_PORT}` || url.startsWith(`http://localhost:${SERVER_PORT}/`)) return;
+    event.preventDefault();
+    if (/^https:\/\//i.test(url)) shell.openExternal(url).catch((err) => log("could not open external link:", err.message));
   });
   // Links to outside websites (the IRAS / ACRA portal shortcuts) open in the
   // computer's normal browser, not inside the app. Everything else — notably the
@@ -343,6 +374,9 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // The app never needs the camera, microphone, location or similar, so every such request is refused.
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   const logDir = userDataPath("logs");
   fs.mkdirSync(logDir, { recursive: true });
   logStream = fs.createWriteStream(path.join(logDir, "startup.log"), { flags: "a" });
@@ -362,6 +396,10 @@ app.whenReady().then(async () => {
     );
     app.quit();
   }
+});
+
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("will-attach-webview", (e) => e.preventDefault());
 });
 
 app.on("window-all-closed", () => {
