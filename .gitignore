@@ -32,3 +32,16 @@ Thumbs.db
 # Downloaded installers — built by CI and published to GitHub Releases,
 # never committed to the repo itself
 *.exe
+
+# Secrets, keys and local databases - never commit these
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+jwt-secret.txt
+*.sqlite
+*.sqlite3
+fams-database/
+uploads/
+_out/
