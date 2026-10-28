@@ -13,7 +13,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
-const { CATEGORY_INFO, sendRawTSPL, buildDocumentLabelTSPL, buildBoxLabelTSPL, buildClientFolderLabelTSPL } = require("./print.js");
+const { CATEGORY_INFO, sendRawTSPL, buildDocumentLabelTSPL, buildBoxLabelTSPL, buildClientFolderLabelTSPL, setConfig: setPrinterConfig, getConfig: getPrinterConfig, listPrinters, resolvePrinter } = require("./print.js");
 const multer = require("multer");
 const storage = require("./storage.js");
 
@@ -119,6 +119,7 @@ async function initSchema() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+    CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
 
   if (filings) await filings.initFilingSchema({ dbRun, dbGet });
@@ -518,13 +519,102 @@ app.patch("/api/clients/:id/report-fields", async (req, res, next) => {
   }
 });
 
+// ---------- Label printer settings ----------
+// Which printer to use and the label size are saved with the app's data, so the same app works on
+// any computer: each install picks its own printer.
+
+async function applyPrinterSettings() {
+  try {
+    const row = await dbGet("SELECT value FROM app_settings WHERE key = 'printer'");
+    if (row) setPrinterConfig(JSON.parse(row.value));
+  } catch (err) {
+    console.error("Could not read the printer settings, using defaults:", err.message);
+  }
+}
+
+app.get("/api/printers", async (req, res, next) => {
+  try {
+    res.json(await listPrinters());
+  } catch (err) {
+    res.status(502).json({ error: `Could not list the printers: ${err.message}` });
+  }
+});
+
+app.get("/api/printer-settings", async (req, res, next) => {
+  try {
+    await applyPrinterSettings();
+    const cfg = getPrinterConfig();
+    let effective = "";
+    let problem = "";
+    try {
+      effective = await resolvePrinter();
+    } catch (err) {
+      problem = err.message;
+    }
+    res.json({ ...cfg, effectivePrinter: effective, problem });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put("/api/printer-settings", async (req, res, next) => {
+  try {
+    await applyPrinterSettings();
+    const cfg = setPrinterConfig(req.body || {});
+    await dbRun(
+      "INSERT INTO app_settings (key, value) VALUES ('printer', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+      [JSON.stringify(cfg)]
+    );
+    res.json(cfg);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A sample label so the printer, the label size and the alignment can be checked before real use.
+app.post("/api/printer/test", async (req, res, next) => {
+  try {
+    await applyPrinterSettings();
+    const tspl = buildClientFolderLabelTSPL({ company: "TEST LABEL", roc: "", fileNo: "T1", boxNote: "Box 1 of 1" });
+    const used = await sendRawTSPL(tspl);
+    res.json({ ok: true, printer: used });
+  } catch (err) {
+    res.status(502).json({ error: `Printing failed: ${err.message}` });
+  }
+});
+
+function cleanBoxNote(v) {
+  return String(v == null ? "" : v).replace(/[\r\n"\\]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
 app.post("/api/clients/:id/print-folder-label", async (req, res, next) => {
   try {
     const client = await dbGet("SELECT * FROM clients WHERE id = $1", [req.params.id]);
     if (!client) return res.status(404).json({ error: "Client not found" });
-    const tspl = buildClientFolderLabelTSPL({ company: client.company, roc: client.roc, fileNo: client.file_no });
+    await applyPrinterSettings();
+    const tspl = buildClientFolderLabelTSPL({ company: client.company, roc: client.roc, fileNo: client.file_no, boxNote: cleanBoxNote(req.body && req.body.boxNote) });
     await sendRawTSPL(tspl);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: `Printing failed: ${err.message}` });
+  }
+});
+
+// One folder label per client, for labelling the folders and boxes already in the office.
+app.post("/api/clients/print-folder-labels", async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body && req.body.clientIds) ? req.body.clientIds.filter((x) => Number.isInteger(x)).slice(0, 300) : [];
+    if (!ids.length) return res.status(400).json({ error: "Choose at least one client." });
+    await applyPrinterSettings();
+    const boxNote = cleanBoxNote(req.body.boxNote);
+    let printed = 0;
+    for (const id of ids) {
+      const client = await dbGet("SELECT * FROM clients WHERE id = $1", [id]);
+      if (!client) continue;
+      await sendRawTSPL(buildClientFolderLabelTSPL({ company: client.company, roc: client.roc, fileNo: client.file_no, boxNote }));
+      printed += 1;
+    }
+    res.json({ ok: true, printed });
   } catch (err) {
     res.status(502).json({ error: `Printing failed: ${err.message}` });
   }
@@ -819,15 +909,17 @@ app.post("/api/documents/:id/print", async (req, res, next) => {
       [req.params.id]
     );
     if (!doc) return res.status(404).json({ error: "Document not found" });
+    await applyPrinterSettings();
 
     const tspl = doc.is_batch
-      ? buildBoxLabelTSPL({ clientName: doc.client_name, code: doc.code, location: doc.location, batchCount: doc.batch_count, dateReceived: doc.date_received })
+      ? buildBoxLabelTSPL({ clientName: doc.client_name, code: doc.code, location: doc.location, batchCount: doc.batch_count, dateReceived: doc.date_received, receivedBy: doc.logged_by })
       : buildDocumentLabelTSPL({
           categoryLabel: (CATEGORY_INFO[doc.category] || {}).label || doc.category,
           clientName: doc.client_name,
           code: doc.code,
           location: doc.location,
           dateReceived: doc.date_received,
+          receivedBy: doc.logged_by,
         });
 
     await sendRawTSPL(tspl);
